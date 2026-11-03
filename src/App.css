@@ -1,0 +1,380 @@
+.counter {
+  font-size: 16px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 2px solid transparent;
+  transition: border-color 0.3s;
+  margin-bottom: 24px;
+
+  &:hover {
+    border-color: var(--accent-border);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+.hero {
+  position: relative;
+
+  .base,
+  .framework,
+  .vite {
+    inset-inline: 0;
+    margin: 0 auto;
+  }
+
+  .base {
+    width: 170px;
+    position: relative;
+    z-index: 0;
+  }
+
+  .framework,
+  .vite {
+    position: absolute;
+  }
+
+  .framework {
+    z-index: 1;
+    top: 34px;
+    height: 28px;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
+      scale(1.4);
+  }
+
+  .vite {
+    z-index: 0;
+    top: 107px;
+    height: 26px;
+    width: auto;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
+      scale(0.8);
+  }
+}
+
+#center {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+  place-content: center;
+  place-items: center;
+  flex-grow: 1;
+
+  @media (max-width: 1024px) {
+    padding: 32px 20px 24px;
+    gap: 18px;
+  }
+}
+
+#next-steps {
+  display: flex;
+  border-top: 1px solid var(--border);
+  text-align: left;
+
+  & > div {
+    flex: 1 1 0;
+    padding: 32px;
+    @media (max-width: 1024px) {
+      padding: 24px 20px;
+    }
+  }
+
+  .icon {
+    margin-bottom: 16px;
+    width: 22px;
+    height: 22px;
+  }
+
+  @media (max-width: 1024px) {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+#docs {
+  border-right: 1px solid var(--border);
+
+  @media (max-width: 1024px) {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+#next-steps ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  margin: 32px 0 0;
+
+  .logo {
+    height: 18px;
+  }
+
+  a {
+    color: var(--text-h);
+    font-size: 16px;
+    border-radius: 6px;
+    background: var(--social-bg);
+    display: flex;
+    padding: 6px 12px;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    transition: box-shadow 0.3s;
+
+    &:hover {
+      box-shadow: var(--shadow);
+    }
+    .button-icon {
+      height: 18px;
+      width: 18px;
+    }
+  }
+
+  @media (max-width: 1024px) {
+    margin-top: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+
+    li {
+      flex: 1 1 calc(50% - 8px);
+    }
+
+    a {
+      width: 100%;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+  }
+}
+
+#spacer {
+  height: 88px;
+  border-top: 1px solid var(--border);
+  @media (max-width: 1024px) {
+    height: 48px;
+  }
+}
+
+.ticks {
+  position: relative;
+  width: 100%;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: -4.5px;
+    border: 5px solid transparent;
+  }
+
+  &::before {
+    left: 0;
+    border-left-color: var(--border);
+  }
+  &::after {
+    right: 0;
+    border-right-color: var(--border);
+  }
+}
+
+/* =====================================
+   REPORTING OFFICER - REVIEW APPLICATIONS
+===================================== */
+
+.officer-review-page {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.officer-review-page * {
+  box-sizing: border-box;
+}
+
+/* Pending Applications Heading */
+
+.review-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.review-panel-heading h3 {
+  margin: 0 0 6px;
+  color: #17365d;
+  font-size: 19px;
+}
+
+.review-panel-heading p {
+  margin: 0;
+  color: #8291a8;
+  font-size: 14px;
+}
+
+.review-count {
+  background: #fff2d9;
+  color: #c47b08;
+  padding: 9px 15px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Application Queue */
+
+.review-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.review-queue-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e6edf6;
+  border-radius: 12px;
+  transition: 0.2s ease;
+}
+
+.review-queue-item:hover {
+  border-color: #b9d0f5;
+  box-shadow: 0 4px 14px rgba(28, 75, 140, 0.06);
+}
+
+/* Employee Avatar */
+
+.review-employee-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e9f0ff;
+  color: #2868d7;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* Employee Information */
+
+.review-queue-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.review-queue-info strong {
+  color: #18365d;
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.review-queue-info span {
+  color: #687c98;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.review-queue-info small {
+  color: #8291a8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Review Button */
+
+.review-queue-review-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: auto;
+  min-width: 115px;
+  flex: none;
+  padding: 11px 20px;
+  border: none;
+  border-radius: 8px;
+  background: #2868d7;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.review-queue-review-button:hover {
+  background: #1955bd;
+  transform: translateY(-1px);
+}
+
+.review-queue-review-button span {
+  font-size: 17px;
+}
+
+/* Empty State */
+
+.review-empty {
+  text-align: center;
+  padding: 45px 20px;
+}
+
+.review-empty > span {
+  display: inline-flex;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #e5f7ed;
+  color: #24945a;
+  font-size: 24px;
+}
+
+.review-empty h3 {
+  color: #17365d;
+  margin: 14px 0 6px;
+}
+
+.review-empty p {
+  color: #8291a8;
+  font-size: 14px;
+}
+
+/* Responsive */
+
+@media (max-width: 650px) {
+  .review-queue-item {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+    padding: 15px;
+  }
+
+  .review-queue-review-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .review-panel-heading {
+    align-items: flex-start;
+  }
+}
