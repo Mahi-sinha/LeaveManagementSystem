@@ -1,65 +1,109 @@
 
-import { useState } from "react";
-
-const initialLogins = [
-  {
-    id: 1,
-    loginId: "EMP001",
-    name: "Anushka Jha",
-    email: "employee@leaveflow.com",
-    role: "Employee",
-    status: "Active",
-  },
-  {
-    id: 2,
-    loginId: "OFF001",
-    name: "Rahul Sharma",
-    email: "officer@leaveflow.com",
-    role: "Reporting Officer",
-    status: "Active",
-  },
-  {
-    id: 3,
-    loginId: "APR001",
-    name: "Priya Verma",
-    email: "approver@leaveflow.com",
-    role: "Approving Officer",
-    status: "Active",
-  },
-  {
-    id: 4,
-    loginId: "ADM001",
-    name: "Admin",
-    email: "admin@leaveflow.com",
-    role: "Admin",
-    status: "Active",
-  },
-];
+import { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 
 function LoginMaster() {
-  // LOGIN DATA
-  const [logins, setLogins] = useState(initialLogins);
-
-  // SEARCH
-  const [search, setSearch] = useState("");
-
-  // FORM
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-
   const emptyForm = {
     loginId: "",
-    name: "",
+    employeeId: "",
     email: "",
-    role: "Employee",
+    roleId: "",
     status: "Active",
   };
 
+  const [logins, setLogins] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [roles, setRoles] = useState([]);
+
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
 
-  // FILTER LOGIN ACCOUNTS
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  // LOAD DATABASE RECORDS
+  async function loadData() {
+    setLoading(true);
+    setError("");
+
+    const [loginResult, employeeResult, roleResult] =
+      await Promise.all([
+        supabase
+          .from("login_master")
+          .select(
+            "login_id, employee_name, email, role_id, status, employee_id"
+          )
+          .order("login_id"),
+
+        supabase
+          .from("employee_master")
+          .select("employee_id, employee_name")
+          .order("employee_name"),
+
+        supabase
+          .from("role_master")
+          .select("id, role_name, status")
+          .order("id"),
+      ]);
+
+    if (
+      loginResult.error ||
+      employeeResult.error ||
+      roleResult.error
+    ) {
+      setError(
+        loginResult.error?.message ||
+        employeeResult.error?.message ||
+        roleResult.error?.message ||
+        "Unable to load login data."
+      );
+
+      setLoading(false);
+      return;
+    }
+
+    setLogins(loginResult.data || []);
+    setEmployees(employeeResult.data || []);
+    setRoles(roleResult.data || []);
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // GET ROLE NAME
+  function getRoleName(roleId) {
+    return (
+      roles.find((role) => role.id === roleId)?.role_name ||
+      "Unknown Role"
+    );
+  }
+
+  // ADMIN PROTECTION
+  function isAdmin(item) {
+    return (
+      item.login_id === "ADMIN001" ||
+      getRoleName(item.role_id).toLowerCase() === "admin"
+    );
+  }
+
+  // EMPLOYEES WITHOUT LOGIN ACCOUNTS
+  const availableEmployees = employees.filter(
+    (employee) =>
+      !logins.some(
+        (login) => login.employee_id === employee.employee_id
+      )
+  );
+
+  // SEARCH
   const filteredLogins = logins.filter((item) =>
-    `${item.loginId} ${item.name} ${item.email} ${item.role}`
+    `${item.login_id} ${item.employee_name} ${item.email} ${getRoleName(item.role_id)}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -68,14 +112,14 @@ function LoginMaster() {
   const totalCount = logins.length;
 
   const activeCount = logins.filter(
-    (item) => item.status === "Active"
+    (item) => item.status?.toLowerCase() === "active"
   ).length;
 
   const inactiveCount = logins.filter(
-    (item) => item.status === "Inactive"
+    (item) => item.status?.toLowerCase() === "inactive"
   ).length;
 
-  // HANDLE FORM INPUTS
+  // FORM INPUT
   function handleChange(e) {
     const { name, value } = e.target;
 
@@ -87,8 +131,20 @@ function LoginMaster() {
 
   // OPEN CREATE FORM
   function handleCreate() {
-    setForm(emptyForm);
+    setError("");
+    setMessage("");
     setEditingId(null);
+
+    setForm({
+      ...emptyForm,
+      roleId:
+        roles.find(
+          (role) =>
+            role.role_name.toLowerCase() === "employee" &&
+            role.status?.toLowerCase() === "active"
+        )?.id?.toString() || "",
+    });
+
     setShowForm(true);
   }
 
@@ -97,101 +153,169 @@ function LoginMaster() {
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
   }
 
-  // CREATE OR UPDATE LOGIN
-  function handleSubmit(e) {
+  // CREATE / UPDATE LOGIN
+  async function handleSubmit(e) {
     e.preventDefault();
 
-    const duplicate = logins.some(
-      (item) =>
-        item.id !== editingId &&
-        (
-          item.loginId.toLowerCase() ===
-            form.loginId.trim().toLowerCase() ||
-          item.email.toLowerCase() ===
-            form.email.trim().toLowerCase()
-        )
+    setError("");
+    setMessage("");
+
+    if (saving) return;
+
+    const selectedRole = roles.find(
+      (role) => role.id === Number(form.roleId)
     );
 
-    if (duplicate) {
-      alert("Login ID or email already exists.");
+    if (
+      !selectedRole ||
+      selectedRole.status?.toLowerCase() !== "active"
+    ) {
+      setError("Please select an active role.");
       return;
     }
 
-    const updatedForm = {
-      ...form,
-      loginId: form.loginId.trim(),
-      name: form.name.trim(),
-      email: form.email.trim(),
-    };
-
-    if (editingId !== null) {
-      setLogins((previous) =>
-        previous.map((item) =>
-          item.id === editingId
-            ? {
-                ...updatedForm,
-                id: editingId,
-              }
-            : item
-        )
+    // CREATE LOGIN
+    if (editingId === null) {
+      const selectedEmployee = employees.find(
+        (employee) =>
+          employee.employee_id === form.employeeId
       );
-    } else {
-      const newLogin = {
-        ...updatedForm,
-        id: Date.now(),
-      };
 
-      setLogins((previous) => [...previous, newLogin]);
+      if (!selectedEmployee) {
+        setError("Please select a valid employee.");
+        return;
+      }
+
+      if (
+        selectedRole.role_name.toLowerCase() === "admin"
+      ) {
+        setError("Additional Admin accounts cannot be created.");
+        return;
+      }
+
+      setSaving(true);
+
+      const { data, error: functionError } =
+        await supabase.functions.invoke("manage-login", {
+          body: {
+            login_id: form.loginId.trim(),
+            employee_id: form.employeeId,
+            email: form.email.trim().toLowerCase(),
+            role_id: Number(form.roleId),
+          },
+        });
+
+      setSaving(false);
+
+      if (functionError || !data?.success) {
+        setError(
+          data?.error ||
+          functionError?.message ||
+          "Unable to create login account."
+        );
+        return;
+      }
+
+      setMessage(
+        "Invitation sent successfully to " + form.email.trim()
+      );
+
+      closeForm();
+      await loadData();
+      return;
     }
 
+    // UPDATE EXISTING LOGIN
+    const existingLogin = logins.find(
+      (item) => item.login_id === editingId
+    );
+
+    if (!existingLogin || isAdmin(existingLogin)) {
+      setError("This account cannot be modified.");
+      return;
+    }
+
+    setSaving(true);
+
+    const { error: updateError } = await supabase
+      .from("login_master")
+      .update({
+        role_id: Number(form.roleId),
+        status: form.status,
+      })
+      .eq("login_id", editingId);
+
+    setSaving(false);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setMessage("Login account updated successfully.");
+
     closeForm();
+    await loadData();
   }
 
   // EDIT LOGIN
   function handleEdit(item) {
+    if (isAdmin(item)) return;
+
+    setError("");
+    setMessage("");
+
     setForm({
-      loginId: item.loginId,
-      name: item.name,
+      loginId: item.login_id,
+      employeeId: item.employee_id,
       email: item.email,
-      role: item.role,
+      roleId: item.role_id.toString(),
       status: item.status,
     });
 
-    setEditingId(item.id);
+    setEditingId(item.login_id);
     setShowForm(true);
   }
 
-  // ACTIVATE / DEACTIVATE LOGIN
-  function toggleStatus(id) {
-    setLogins((previous) =>
-      previous.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status:
-                item.status === "Active"
-                  ? "Inactive"
-                  : "Active",
-            }
-          : item
-      )
-    );
-  }
+  // ACTIVATE / DEACTIVATE
+  async function toggleStatus(item) {
+    if (isAdmin(item)) return;
 
-  // DELETE LOGIN
-  function handleDelete(id) {
+    const newStatus =
+      item.status?.toLowerCase() === "active"
+        ? "Inactive"
+        : "Active";
+
     const confirmed = window.confirm(
-      "Are you sure you want to delete this login account?"
+      `Are you sure you want to ${newStatus.toLowerCase()} this login account?`
     );
 
     if (!confirmed) return;
 
-    setLogins((previous) =>
-      previous.filter((item) => item.id !== id)
-    );
+    setError("");
+    setMessage("");
+
+    const { error: updateError } = await supabase
+      .from("login_master")
+      .update({ status: newStatus })
+      .eq("login_id", item.login_id);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setMessage(`Account ${newStatus.toLowerCase()} successfully.`);
+    await loadData();
   }
+
+  // SELECTED EMPLOYEE
+  const selectedEmployee = employees.find(
+    (employee) => employee.employee_id === form.employeeId
+  );
 
   return (
     <div className="page-content login-master-page">
@@ -219,14 +343,26 @@ function LoginMaster() {
         </button>
       </div>
 
-      {/* STATISTICS CARDS */}
+      {/* MESSAGES */}
+      {message && (
+        <p role="status" style={{ color: "green", marginBottom: "15px" }}>
+          {message}
+        </p>
+      )}
+
+      {error && (
+        <p role="alert" style={{ color: "red", marginBottom: "15px" }}>
+          {error}
+        </p>
+      )}
+
+      {/* STATISTICS */}
       <div className="master-stats">
 
         <div className="master-stat-card">
           <div className="master-stat-icon">
             <span>♟</span>
           </div>
-
           <div>
             <p>Total Accounts</p>
             <h2>{totalCount}</h2>
@@ -237,7 +373,6 @@ function LoginMaster() {
           <div className="master-stat-icon">
             <span>✓</span>
           </div>
-
           <div>
             <p>Active Accounts</p>
             <h2>{activeCount}</h2>
@@ -248,7 +383,6 @@ function LoginMaster() {
           <div className="master-stat-icon">
             <span>⊘</span>
           </div>
-
           <div>
             <p>Inactive Accounts</p>
             <h2>{inactiveCount}</h2>
@@ -257,7 +391,7 @@ function LoginMaster() {
 
       </div>
 
-      {/* CREATE / EDIT LOGIN FORM */}
+      {/* CREATE / EDIT FORM */}
       {showForm && (
         <div className="master-form-card">
 
@@ -270,7 +404,9 @@ function LoginMaster() {
               </h2>
 
               <p>
-                Enter the login account details below.
+                {editingId !== null
+                  ? "Update the account details below."
+                  : "Create a login account and send an invitation."}
               </p>
             </div>
 
@@ -296,20 +432,48 @@ function LoginMaster() {
                   placeholder="Enter login ID"
                   value={form.loginId}
                   onChange={handleChange}
+                  disabled={editingId !== null}
                   required
                 />
               </div>
 
               <div className="master-field">
-                <label>Employee Name *</label>
+                <label>Select Employee *</label>
+
+                <select
+                  name="employeeId"
+                  value={form.employeeId}
+                  onChange={handleChange}
+                  disabled={editingId !== null}
+                  required
+                >
+                  <option value="">Select Employee</option>
+
+                  {(editingId !== null
+                    ? employees.filter(
+                        (employee) =>
+                          employee.employee_id === form.employeeId
+                      )
+                    : availableEmployees
+                  ).map((employee) => (
+                    <option
+                      key={employee.employee_id}
+                      value={employee.employee_id}
+                    >
+                      {employee.employee_name} ({employee.employee_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="master-field">
+                <label>Employee Name</label>
 
                 <input
                   type="text"
-                  name="name"
-                  placeholder="Enter employee name"
-                  value={form.name}
-                  onChange={handleChange}
-                  required
+                  value={selectedEmployee?.employee_name || ""}
+                  placeholder="Select an employee"
+                  readOnly
                 />
               </div>
 
@@ -322,6 +486,7 @@ function LoginMaster() {
                   placeholder="Enter email address"
                   value={form.email}
                   onChange={handleChange}
+                  disabled={editingId !== null}
                   required
                 />
               </div>
@@ -330,41 +495,44 @@ function LoginMaster() {
                 <label>Assign Role *</label>
 
                 <select
-                  name="role"
-                  value={form.role}
+                  name="roleId"
+                  value={form.roleId}
                   onChange={handleChange}
                   required
                 >
-                  <option value="Employee">
-                    Employee
-                  </option>
+                  <option value="">Select Role</option>
 
-                  <option value="Reporting Officer">
-                    Reporting Officer
-                  </option>
-
-                  <option value="Approving Officer">
-                    Approving Officer
-                  </option>
-
-                  <option value="Admin">
-                    Admin
-                  </option>
+                  {roles
+                    .filter(
+                      (role) =>
+                        role.status?.toLowerCase() === "active" &&
+                        role.role_name.toLowerCase() !== "admin"
+                    )
+                    .map((role) => (
+                      <option
+                        key={role.id}
+                        value={role.id}
+                      >
+                        {role.role_name}
+                      </option>
+                    ))}
                 </select>
               </div>
 
-              <div className="master-field">
-                <label>Account Status</label>
+              {editingId !== null && (
+                <div className="master-field">
+                  <label>Account Status</label>
 
-                <select
-                  name="status"
-                  value={form.status}
-                  onChange={handleChange}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
+                  <select
+                    name="status"
+                    value={form.status}
+                    onChange={handleChange}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              )}
 
             </div>
 
@@ -374,6 +542,7 @@ function LoginMaster() {
                 type="button"
                 className="master-cancel-btn"
                 onClick={closeForm}
+                disabled={saving}
               >
                 Cancel
               </button>
@@ -381,10 +550,13 @@ function LoginMaster() {
               <button
                 type="submit"
                 className="master-primary-btn"
+                disabled={saving}
               >
-                {editingId !== null
-                  ? "Update Account"
-                  : "Create Account"}
+                {saving
+                  ? "Please wait..."
+                  : editingId !== null
+                    ? "Update Account"
+                    : "Create Account"}
               </button>
 
             </div>
@@ -393,7 +565,7 @@ function LoginMaster() {
         </div>
       )}
 
-      {/* LOGIN ACCOUNTS TABLE */}
+      {/* LOGIN TABLE */}
       <div className="master-table-card">
 
         <div className="master-table-header">
@@ -433,27 +605,31 @@ function LoginMaster() {
 
             <tbody>
 
-              {filteredLogins.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan="6" className="master-empty">
+                    Loading login accounts...
+                  </td>
+                </tr>
+              ) : filteredLogins.length > 0 ? (
 
                 filteredLogins.map((item) => (
-
-                  <tr key={item.id}>
+                  <tr key={item.login_id}>
 
                     <td>
-                      <strong>{item.loginId}</strong>
+                      <strong>{item.login_id}</strong>
                     </td>
 
-                    <td>{item.name}</td>
+                    <td>{item.employee_name}</td>
 
                     <td>{item.email}</td>
 
-                    <td>{item.role}</td>
+                    <td>{getRoleName(item.role_id)}</td>
 
-                    {/* STATUS */}
                     <td>
                       <span
                         className={`login-status-badge ${
-                          item.status === "Active"
+                          item.status?.toLowerCase() === "active"
                             ? "active"
                             : "inactive"
                         }`}
@@ -463,51 +639,45 @@ function LoginMaster() {
                       </span>
                     </td>
 
-                    {/* ACTIONS */}
                     <td>
                       <div className="login-row-actions">
 
-                        <button
-                          type="button"
-                          className="login-edit-btn"
-                          onClick={() => handleEdit(item)}
-                        >
-                          Edit
-                        </button>
+                        {isAdmin(item) ? (
+                          <span>Protected</span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="login-edit-btn"
+                              onClick={() => handleEdit(item)}
+                            >
+                              Edit
+                            </button>
 
-                        <button
-                          type="button"
-                          className="login-toggle-btn"
-                          onClick={() => toggleStatus(item.id)}
-                        >
-                          {item.status === "Active"
-                            ? "Deactivate"
-                            : "Activate"}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="login-delete-btn"
-                          onClick={() => handleDelete(item.id)}
-                        >
-                          Delete
-                        </button>
+                            <button
+                              type="button"
+                              className="login-toggle-btn"
+                              onClick={() => toggleStatus(item)}
+                            >
+                              {item.status?.toLowerCase() === "active"
+                                ? "Deactivate"
+                                : "Activate"}
+                            </button>
+                          </>
+                        )}
 
                       </div>
                     </td>
 
                   </tr>
-
                 ))
 
               ) : (
-
                 <tr>
                   <td colSpan="6" className="master-empty">
                     No login accounts found.
                   </td>
                 </tr>
-
               )}
 
             </tbody>
@@ -523,4 +693,3 @@ function LoginMaster() {
 }
 
 export default LoginMaster;
-

@@ -1,65 +1,7 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabaseClient";
 import "./EmployeeMaster.css";
-
-const initialEmployees = [
-  {
-    id: 1,
-    name: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Software Engineer",
-    office: "Noida Office",
-    company: "ABC Technologies",
-  },
-  {
-    id: 2,
-    name: "Rahul Kumar",
-    employeeId: "EMP002",
-    designation: "Developer",
-    office: "Gurgaon Office",
-    company: "ABC Technologies",
-  },
-  {
-    id: 3,
-    name: "Priya Singh",
-    employeeId: "EMP003",
-    designation: "Tester",
-    office: "Bangalore Office",
-    company: "XYZ Solutions",
-  },
-  {
-    id: 4,
-    name: "Amit Verma",
-    employeeId: "EMP004",
-    designation: "Designer",
-    office: "Chennai Office",
-    company: "Global Tech",
-  },
-];
-
-const designations = [
-  "Software Engineer",
-  "Developer",
-  "HR Executive",
-  "Tester",
-  "Designer",
-  "Project Manager",
-  "Team Lead",
-];
-
-const offices = [
-  "Noida Office",
-  "Gurgaon Office",
-  "Bangalore Office",
-  "Chennai Office",
-];
-
-const companies = [
-  "ABC Technologies",
-  "XYZ Solutions",
-  "Global Tech",
-  "Sunrise Group",
-];
 
 const emptyForm = {
   name: "",
@@ -70,13 +12,113 @@ const emptyForm = {
 };
 
 function EmployeeMaster() {
-  const [employees, setEmployees] = useState(initialEmployees);
+  const [employees, setEmployees] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [offices, setOffices] = useState([]);
+  const [designations, setDesignations] = useState([]);
+
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
-  const [formError, setFormError] = useState("");
 
+  const [formError, setFormError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Fetch all employee master data from Supabase
+  async function fetchData() {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      const [
+        employeeResult,
+        companyResult,
+        officeResult,
+        designationResult,
+      ] = await Promise.all([
+        supabase
+          .from("employee_master")
+          .select("employee_id, employee_name, company_id, office_id, designation_id")
+          .order("employee_name"),
+
+        supabase
+          .from("company_master")
+          .select("id, company_name")
+          .order("company_name"),
+
+        supabase
+          .from("office_master")
+          .select("id, office_name, company_id")
+          .order("office_name"),
+
+        supabase
+          .from("designation_master")
+          .select("id, designation_name")
+          .order("designation_name"),
+      ]);
+
+      if (employeeResult.error) throw employeeResult.error;
+      if (companyResult.error) throw companyResult.error;
+      if (officeResult.error) throw officeResult.error;
+      if (designationResult.error) throw designationResult.error;
+
+      setCompanies(companyResult.data || []);
+      setOffices(officeResult.data || []);
+      setDesignations(designationResult.data || []);
+
+      const companyMap = new Map(
+        (companyResult.data || []).map((item) => [
+          String(item.id),
+          item.company_name,
+        ])
+      );
+
+      const officeMap = new Map(
+        (officeResult.data || []).map((item) => [
+          String(item.id),
+          item.office_name,
+        ])
+      );
+
+      const designationMap = new Map(
+        (designationResult.data || []).map((item) => [
+          String(item.id),
+          item.designation_name,
+        ])
+      );
+
+      const formattedEmployees = (employeeResult.data || []).map(
+        (employee) => ({
+          id: employee.employee_id,
+          employeeId: employee.employee_id,
+          name: employee.employee_name,
+          companyId: String(employee.company_id),
+          officeId: String(employee.office_id),
+          designationId: String(employee.designation_id),
+          company: companyMap.get(String(employee.company_id)) || "Unknown",
+          office: officeMap.get(String(employee.office_id)) || "Unknown",
+          designation:
+            designationMap.get(String(employee.designation_id)) || "Unknown",
+        })
+      );
+
+      setEmployees(formattedEmployees);
+    } catch (error) {
+      console.error("Employee Master fetch error:", error);
+      setPageError(error.message || "Unable to load employee records.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Search employees
   const filteredEmployees = useMemo(() => {
     const query = search.toLowerCase().trim();
 
@@ -87,9 +129,18 @@ function EmployeeMaster() {
         employee.designation,
         employee.office,
         employee.company,
-      ].some((value) => value.toLowerCase().includes(query))
+      ].some((value) =>
+        String(value).toLowerCase().includes(query)
+      )
     );
   }, [employees, search]);
+
+  // Offices belonging to the selected company
+  const filteredOffices = useMemo(() => {
+    return offices.filter(
+      (office) => String(office.company_id) === String(formData.company)
+    );
+  }, [offices, formData.company]);
 
   function openAddForm() {
     setEditingEmployee(null);
@@ -100,13 +151,15 @@ function EmployeeMaster() {
 
   function openEditForm(employee) {
     setEditingEmployee(employee);
+
     setFormData({
       name: employee.name,
       employeeId: employee.employeeId,
-      designation: employee.designation,
-      office: employee.office,
-      company: employee.company,
+      company: employee.companyId,
+      office: employee.officeId,
+      designation: employee.designationId,
     });
+
     setFormError("");
     setShowModal(true);
   }
@@ -117,24 +170,55 @@ function EmployeeMaster() {
     setFormData((previous) => ({
       ...previous,
       [name]: value,
+      ...(name === "company" ? { office: "" } : {}),
     }));
+
+    setFormError("");
   }
 
-  function handleSubmit(e) {
+  function closeModal() {
+    if (saving) return;
+
+    setShowModal(false);
+    setEditingEmployee(null);
+    setFormData(emptyForm);
+    setFormError("");
+  }
+
+  // Add or update employee in Supabase
+  async function handleSubmit(e) {
     e.preventDefault();
     setFormError("");
 
-    const cleanedData = {
-      ...formData,
-      name: formData.name.trim(),
-      employeeId: formData.employeeId.trim().toUpperCase(),
-    };
+    const employeeId = formData.employeeId.trim().toUpperCase();
+    const employeeName = formData.name.trim();
+
+    if (!employeeName || !employeeId) {
+      setFormError("Please enter the employee name and ID.");
+      return;
+    }
+
+    if (!formData.company || !formData.office || !formData.designation) {
+      setFormError("Please select company, office and designation.");
+      return;
+    }
+
+    const selectedOffice = offices.find(
+      (office) => String(office.id) === String(formData.office)
+    );
+
+    if (
+      !selectedOffice ||
+      String(selectedOffice.company_id) !== String(formData.company)
+    ) {
+      setFormError("Please select an office belonging to the selected company.");
+      return;
+    }
 
     const duplicateId = employees.some(
       (employee) =>
-        employee.employeeId.toLowerCase() ===
-          cleanedData.employeeId.toLowerCase() &&
-        employee.id !== editingEmployee?.id
+        employee.employeeId.toLowerCase() === employeeId.toLowerCase() &&
+        employee.employeeId !== editingEmployee?.employeeId
     );
 
     if (duplicateId) {
@@ -142,37 +226,77 @@ function EmployeeMaster() {
       return;
     }
 
-    if (editingEmployee) {
-      setEmployees((previous) =>
-        previous.map((employee) =>
-          employee.id === editingEmployee.id
-            ? { ...employee, ...cleanedData }
-            : employee
-        )
-      );
-    } else {
-      setEmployees((previous) => [
-        ...previous,
-        {
-          id: Date.now(),
-          ...cleanedData,
-        },
-      ]);
-    }
+    const employeeData = {
+      employee_id: employeeId,
+      employee_name: employeeName,
+      company_id: Number(formData.company),
+      office_id: Number(formData.office),
+      designation_id: Number(formData.designation),
+    };
 
-    setShowModal(false);
-    setEditingEmployee(null);
-    setFormData(emptyForm);
+    setSaving(true);
+
+    try {
+      let result;
+
+      if (editingEmployee) {
+        // Employee ID is the primary key, so it remains unchanged.
+        result = await supabase
+          .from("employee_master")
+          .update({
+            employee_name: employeeData.employee_name,
+            company_id: employeeData.company_id,
+            office_id: employeeData.office_id,
+            designation_id: employeeData.designation_id,
+          })
+          .eq("employee_id", editingEmployee.employeeId);
+      } else {
+        result = await supabase
+          .from("employee_master")
+          .insert([employeeData]);
+      }
+
+      if (result.error) throw result.error;
+
+      await fetchData();
+
+      setShowModal(false);
+      setEditingEmployee(null);
+      setFormData(emptyForm);
+      setFormError("");
+    } catch (error) {
+      console.error("Employee save error:", error);
+      setFormError(error.message || "Unable to save employee.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDelete(id) {
+  // Delete employee from Supabase
+  async function handleDelete(employeeId) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this employee?"
     );
 
-    if (confirmed) {
-      setEmployees((previous) =>
-        previous.filter((employee) => employee.id !== id)
+    if (!confirmed) return;
+
+    setPageError("");
+
+    try {
+      const { error } = await supabase
+        .from("employee_master")
+        .delete()
+        .eq("employee_id", employeeId);
+
+      if (error) throw error;
+
+      await fetchData();
+    } catch (error) {
+      console.error("Employee delete error:", error);
+
+      setPageError(
+        error.message ||
+          "Unable to delete employee. This employee may be linked to other records."
       );
     }
   }
@@ -204,6 +328,10 @@ function EmployeeMaster() {
         />
       </div>
 
+      {pageError && (
+        <p className="employee-form-error">{pageError}</p>
+      )}
+
       <div className="employee-master-table-wrapper">
         <table className="employee-master-table">
           <thead>
@@ -218,13 +346,21 @@ function EmployeeMaster() {
           </thead>
 
           <tbody>
-            {filteredEmployees.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan="6" className="employee-master-empty">
+                  Loading employees...
+                </td>
+              </tr>
+            ) : filteredEmployees.length > 0 ? (
               filteredEmployees.map((employee, index) => (
-                <tr key={employee.id}>
+                <tr key={employee.employeeId}>
                   <td>{index + 1}</td>
+
                   <td className="employee-name-cell">
                     {employee.name}
                   </td>
+
                   <td>{employee.employeeId}</td>
                   <td>{employee.designation}</td>
                   <td>{employee.office}</td>
@@ -244,7 +380,7 @@ function EmployeeMaster() {
                         type="button"
                         className="employee-master-delete"
                         title="Delete Employee"
-                        onClick={() => handleDelete(employee.id)}
+                        onClick={() => handleDelete(employee.employeeId)}
                       >
                         🗑
                       </button>
@@ -266,7 +402,7 @@ function EmployeeMaster() {
       {showModal && (
         <div
           className="employee-modal-overlay"
-          onClick={() => setShowModal(false)}
+          onClick={closeModal}
         >
           <div
             className="employee-modal"
@@ -283,7 +419,7 @@ function EmployeeMaster() {
               <button
                 type="button"
                 className="employee-modal-close"
-                onClick={() => setShowModal(false)}
+                onClick={closeModal}
               >
                 ×
               </button>
@@ -311,6 +447,7 @@ function EmployeeMaster() {
                   onChange={handleChange}
                   placeholder="Example: EMP005"
                   required
+                  readOnly={!!editingEmployee}
                 />
               </div>
 
@@ -324,9 +461,10 @@ function EmployeeMaster() {
                   required
                 >
                   <option value="">Select company</option>
+
                   {companies.map((company) => (
-                    <option key={company} value={company}>
-                      {company}
+                    <option key={company.id} value={company.id}>
+                      {company.company_name}
                     </option>
                   ))}
                 </select>
@@ -340,11 +478,13 @@ function EmployeeMaster() {
                   value={formData.office}
                   onChange={handleChange}
                   required
+                  disabled={!formData.company}
                 >
                   <option value="">Select office</option>
-                  {offices.map((office) => (
-                    <option key={office} value={office}>
-                      {office}
+
+                  {filteredOffices.map((office) => (
+                    <option key={office.id} value={office.id}>
+                      {office.office_name}
                     </option>
                   ))}
                 </select>
@@ -360,9 +500,10 @@ function EmployeeMaster() {
                   required
                 >
                   <option value="">Select designation</option>
+
                   {designations.map((designation) => (
-                    <option key={designation} value={designation}>
-                      {designation}
+                    <option key={designation.id} value={designation.id}>
+                      {designation.designation_name}
                     </option>
                   ))}
                 </select>
@@ -376,7 +517,8 @@ function EmployeeMaster() {
                 <button
                   type="button"
                   className="employee-modal-cancel"
-                  onClick={() => setShowModal(false)}
+                  onClick={closeModal}
+                  disabled={saving}
                 >
                   Cancel
                 </button>
@@ -384,8 +526,13 @@ function EmployeeMaster() {
                 <button
                   type="submit"
                   className="employee-modal-save"
+                  disabled={saving}
                 >
-                  {editingEmployee ? "Update Employee" : "Save Employee"}
+                  {saving
+                    ? "Saving..."
+                    : editingEmployee
+                      ? "Update Employee"
+                      : "Save Employee"}
                 </button>
               </div>
             </form>

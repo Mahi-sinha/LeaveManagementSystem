@@ -1,5 +1,5 @@
-
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "./supabaseClient";
 import "./index.css";
 import "./dashboard.css";
 
@@ -82,89 +82,6 @@ const initialApplications = [
   },
 ];
 
-// Demo accounts for frontend testing
-const demoUsers = {
-  emp001: {
-    password: "employee123",
-    role: "employee",
-    name: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Employee",
-    department: "Engineering",
-    email: "employee@leaveflow.com",
-  },
-
-  "employee@leaveflow.com": {
-    password: "employee123",
-    role: "employee",
-    name: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Employee",
-    department: "Engineering",
-    email: "employee@leaveflow.com",
-  },
-
-  off001: {
-    password: "officer123",
-    role: "reporting-officer",
-    name: "Rahul Sharma",
-    employeeId: "OFF001",
-    designation: "Reporting Officer",
-    department: "Engineering",
-    email: "officer@leaveflow.com",
-  },
-
-  "officer@leaveflow.com": {
-    password: "officer123",
-    role: "reporting-officer",
-    name: "Rahul Sharma",
-    employeeId: "OFF001",
-    designation: "Reporting Officer",
-    department: "Engineering",
-    email: "officer@leaveflow.com",
-  },
-
-  apr001: {
-    password: "approver123",
-    role: "approving-officer",
-    name: "Priya Verma",
-    employeeId: "APR001",
-    designation: "Approving Officer",
-    department: "Administration",
-    email: "approver@leaveflow.com",
-  },
-
-  "approver@leaveflow.com": {
-    password: "approver123",
-    role: "approving-officer",
-    name: "Priya Verma",
-    employeeId: "APR001",
-    designation: "Approving Officer",
-    department: "Administration",
-    email: "approver@leaveflow.com",
-  },
-
-  admin001: {
-    password: "admin123",
-    role: "admin",
-    name: "Admin",
-    employeeId: "ADM001",
-    designation: "Administrator",
-    department: "Administration",
-    email: "admin@leaveflow.com",
-  },
-
-  "admin@leaveflow.com": {
-    password: "admin123",
-    role: "admin",
-    name: "Admin",
-    employeeId: "ADM001",
-    designation: "Administrator",
-    department: "Administration",
-    email: "admin@leaveflow.com",
-  },
-};
-
 function App() {
   // AUTHENTICATION
   const [employeeId, setEmployeeId] = useState("");
@@ -173,6 +90,12 @@ function App() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // PASSWORD RESET
+  const [isResetPassword, setIsResetPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
 
   // MESSAGES
   const [error, setError] = useState("");
@@ -188,49 +111,252 @@ function App() {
     initialApplications
   );
 
+  // Detect a Supabase password-recovery session.
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setIsResetPassword(true);
+        setError("");
+        setMessage("");
+      }
+    });
+
+    // Also handle a recovery URL if the app loads before the auth event.
+    const hashParams = new URLSearchParams(
+      window.location.hash.replace(/^#/, "")
+    );
+
+    if (hashParams.get("type") === "recovery") {
+      setIsResetPassword(true);
+      setError("");
+      setMessage("");
+    }
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   // ROLE CHECKS
   const isEmployee = userRole === "employee";
   const isReportingOfficer = userRole === "reporting-officer";
   const isApprovingOfficer = userRole === "approving-officer";
   const isAdmin = userRole === "admin";
 
-  // LOGIN
-  function handleLogin(e) {
+  // LOGIN WITH SUPABASE AUTHENTICATION
+  
+  // LOGIN WITH SUPABASE AUTHENTICATION
+  async function handleLogin(e) {
     e.preventDefault();
 
     setError("");
     setMessage("");
 
-    const id = employeeId.trim().toLowerCase();
-    const user = demoUsers[id];
+    const email = employeeId.trim().toLowerCase();
 
-    if (!id || !password.trim()) {
-      setError("Please enter your employee ID and password.");
+    if (!email || !password.trim()) {
+      setError("Please enter your email and password.");
       return;
     }
 
-    if (!user || user.password !== password) {
-      setError("Invalid employee ID/email or password.");
+    try {
+      // STEP 1: Authenticate through Supabase Auth
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+      if (authError) {
+        setError("Invalid email or password.");
+        return;
+      }
+
+      // STEP 2: Fetch login record using Auth UID
+      const { data: loginRecord, error: loginError } =
+        await supabase
+          .from("login_master")
+          .select(`
+            login_id,
+            employee_name,
+            email,
+            status,
+            employee_id,
+            auth_user_id,
+            role:role_master!login_master_role_id_fkey (
+              role_name,
+              status
+            )
+          `)
+          .eq("auth_user_id", authData.user.id)
+          .maybeSingle();
+
+      if (loginError || !loginRecord) {
+        await supabase.auth.signOut();
+
+        setError(
+          "Your login record was not found. Please contact the administrator."
+        );
+        return;
+      }
+
+      // STEP 3: Check account status
+      if (
+        loginRecord.status?.toLowerCase() !== "active" ||
+        loginRecord.role?.status?.toLowerCase() !== "active"
+      ) {
+        await supabase.auth.signOut();
+
+        setError(
+          "Your account is inactive. Please contact the administrator."
+        );
+        return;
+      }
+
+      if (!loginRecord.employee_id) {
+        await supabase.auth.signOut();
+
+        setError(
+          "Your employee record is not linked to your login account."
+        );
+        return;
+      }
+
+      // STEP 4: Fetch employee details
+      const { data: employee, error: employeeError } =
+        await supabase
+          .from("employee_master")
+          .select(`
+            employee_id,
+            employee_name,
+            designation:designation_master!employee_master_designation_id_fkey (
+              designation_name
+            ),
+            office:office_master!employee_master_office_id_fkey (
+              office_name
+            )
+          `)
+          .eq("employee_id", loginRecord.employee_id)
+          .maybeSingle();
+
+      if (employeeError || !employee) {
+        await supabase.auth.signOut();
+
+        setError(
+          "Your employee profile could not be found. Please contact the administrator."
+        );
+        return;
+      }
+
+      // STEP 5: Determine role from actual database record
+      const roleName = loginRecord.role?.role_name
+        ?.trim()
+        .toLowerCase();
+
+      const roleMap = {
+        "admin": "admin",
+        "employee": "employee",
+        "reporting officer": "reporting-officer",
+        "approving officer": "approving-officer",
+      };
+
+      const role = roleMap[roleName];
+
+      if (!role) {
+        await supabase.auth.signOut();
+
+        setError(
+          "Your assigned role is not supported. Please contact the administrator."
+        );
+        return;
+      }
+
+      // STEP 6: Prepare logged-in user
+      const user = {
+        id: employee.employee_id,
+        name: employee.employee_name,
+        employeeId: employee.employee_id,
+        designation:
+          employee.designation?.designation_name || "",
+        department:
+          employee.office?.office_name || "",
+        email: loginRecord.email,
+        role,
+      };
+
+      // STEP 7: Update application state
+      setCurrentUser(user);
+      setUserRole(role);
+      setLoggedIn(true);
+
+      setSelectedApplication(null);
+
+      // STEP 8: Navigate according to role
+      if (role === "reporting-officer") {
+        setCurrentPage("reporting-dashboard");
+      } else if (role === "approving-officer") {
+        setCurrentPage("approving-dashboard");
+      } else if (role === "admin") {
+        setCurrentPage("company-master");
+      } else {
+        setCurrentPage("dashboard");
+      }
+
+      setPassword("");
+      setShowPassword(false);
+
+    } catch (loginError) {
+      await supabase.auth.signOut();
+
+      console.error("Login error:", loginError);
+
+      setError(
+        "Unable to sign in. Please try again."
+      );
+    }
+  }
+
+
+  // UPDATE PASSWORD AFTER RECOVERY
+  async function handlePasswordUpdate(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+
+    if (newPassword.length < 8) {
+      setError("Your password must contain at least 8 characters.");
       return;
     }
 
-    setCurrentUser(user);
-    setUserRole(user.role);
-    setLoggedIn(true);
-    setSelectedApplication(null);
-
-    if (user.role === "reporting-officer") {
-      setCurrentPage("reporting-dashboard");
-    } else if (user.role === "approving-officer") {
-      setCurrentPage("approving-dashboard");
-    } else if (user.role === "admin") {
-      setCurrentPage("company-master");
-    } else {
-      setCurrentPage("dashboard");
+    if (newPassword !== confirmNewPassword) {
+      setError("The passwords do not match.");
+      return;
     }
 
-    setPassword("");
-    setShowPassword(false);
+    setResetLoading(true);
+
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        setError(updateError.message || "Unable to update password.");
+        return;
+      }
+
+      await supabase.auth.signOut();
+
+      setIsResetPassword(false);
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setPassword("");
+      setMessage("Password updated successfully. Please sign in with your new password.");
+    } catch (updateError) {
+      setError(updateError.message || "Unable to update password. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
   }
 
   // FORGOT PASSWORD
@@ -242,7 +368,9 @@ function App() {
   }
 
   // LOGOUT
-  function handleLogout() {
+  async function handleLogout() {
+    await supabase.auth.signOut();
+
     setLoggedIn(false);
     setUserRole(null);
     setCurrentUser(null);
@@ -261,8 +389,7 @@ function App() {
     setCurrentPage(page);
     setSelectedApplication(null);
   }
-
-  // SUBMIT LEAVE APPLICATION
+    // SUBMIT LEAVE APPLICATION
   function handleLeaveSubmit(newApplication) {
     const isOfficerApplication =
       userRole === "reporting-officer";
@@ -390,10 +517,97 @@ function App() {
     setCurrentPage(previousPage);
   }
 
-  // LOGIN PAGE
+  // LOGIN PAGE AND PASSWORD RESET PAGE
   if (!loggedIn) {
+    if (isResetPassword) {
+      return (
+        <main className="login-page">
+          <section className="welcome-section">
+            <div className="brand">
+              <div className="brand-icon">L</div>
+              <span>LeaveFlow</span>
+            </div>
+
+            <div className="welcome-content">
+              <h1>Secure Your Account</h1>
+              <p className="welcome-description">
+                Choose a new password to regain access to your LeaveFlow account.
+              </p>
+            </div>
+
+            <p className="welcome-footer">
+              LeaveFlow · Your workplace, simplified
+            </p>
+          </section>
+
+          <section className="login-section">
+            <div className="login-card">
+              <div className="login-logo">
+                <span className="leaf-icon">◆</span>
+              </div>
+
+              <h2>Set New Password</h2>
+              <p className="login-subtitle">
+                Enter and confirm your new password
+              </p>
+
+              <form onSubmit={handlePasswordUpdate}>
+                <div className="form-group">
+                  <label htmlFor="newPassword">New Password</label>
+                  <input
+                    id="newPassword"
+                    type="password"
+                    placeholder="Enter new password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="confirmNewPassword">Confirm New Password</label>
+                  <input
+                    id="confirmNewPassword"
+                    type="password"
+                    placeholder="Re-enter new password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <p className="form-message error" role="alert">
+                    {error}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="sign-in-button"
+                  disabled={resetLoading}
+                >
+                  {resetLoading ? "Updating..." : "Update Password"}
+                  {!resetLoading && <span>→</span>}
+                </button>
+              </form>
+
+              <div className="login-security">
+                <span>🔒</span>
+                Your new password must be at least 8 characters.
+              </div>
+            </div>
+          </section>
+        </main>
+      );
+    }
+
     return (
-      <main className="login-page">
+            <main className="login-page">
         <section className="welcome-section">
           <div className="brand">
             <div className="brand-icon">L</div>
@@ -468,18 +682,18 @@ function App() {
             <form onSubmit={handleLogin}>
               <div className="form-group">
                 <label htmlFor="employeeId">
-                  Employee ID / Email
+                  Email Address
                 </label>
 
                 <input
                   id="employeeId"
                   type="text"
-                  placeholder="Enter your employee ID or email"
+                  placeholder="Enter your registered email address"
                   value={employeeId}
                   onChange={(e) =>
                     setEmployeeId(e.target.value)
                   }
-                  autoComplete="username"
+                  autoComplete="email"
                   required
                 />
               </div>
@@ -545,21 +759,6 @@ function App() {
             <div className="login-security">
               <span>🔒</span>
               Secure &amp; Reliable · Easy to Use
-            </div>
-
-            <div className="demo-credentials">
-              <p>
-                <strong>Employee:</strong> EMP001 / employee123
-              </p>
-              <p>
-                <strong>Reporting Officer:</strong> OFF001 / officer123
-              </p>
-              <p>
-                <strong>Approving Officer:</strong> APR001 / approver123
-              </p>
-              <p>
-                <strong>Admin:</strong> admin001 / admin123
-              </p>
             </div>
           </div>
         </section>
@@ -728,8 +927,7 @@ function App() {
             </nav>
           </>
         )}
-
-        {/* ADMIN SIDEBAR */}
+                {/* ADMIN SIDEBAR */}
         {isAdmin && (
           <>
             <p className="sidebar-label">MASTER DATA</p>
@@ -919,4 +1117,3 @@ function App() {
 }
 
 export default App;
-

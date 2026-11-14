@@ -1,32 +1,84 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabaseClient";
 import "./OfficeMaster.css";
 
-const initialOffices = [
-  { id: 1, name: "Noida Office", company: "ABC Technologies" },
-  { id: 2, name: "Gurgaon Office", company: "ABC Technologies" },
-  { id: 3, name: "Bangalore Office", company: "XYZ Solutions" },
-  { id: 4, name: "Chennai Office", company: "Global Tech" },
-];
-
-const companies = [
-  "ABC Technologies",
-  "XYZ Solutions",
-  "Global Tech",
-  "Sunrise Group",
-];
-
 function OfficeMaster() {
-  const [offices, setOffices] = useState(initialOffices);
+  const [offices, setOffices] = useState([]);
+  const [companies, setCompanies] = useState([]);
+
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingOffice, setEditingOffice] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
     company: "",
   });
 
+  // Fetch companies and offices from Supabase
+  async function fetchData() {
+    setLoading(true);
+    setError("");
+
+    const [companyResult, officeResult] = await Promise.all([
+      supabase
+        .from("company_master")
+        .select("id, company_name")
+        .order("company_name", { ascending: true }),
+
+      supabase
+        .from("office_master")
+        .select("id, office_name, company_id")
+        .order("id", { ascending: true }),
+    ]);
+
+    if (companyResult.error) {
+      setError(companyResult.error.message);
+      setCompanies([]);
+      setOffices([]);
+      setLoading(false);
+      return;
+    }
+
+    if (officeResult.error) {
+      setError(officeResult.error.message);
+      setCompanies(companyResult.data || []);
+      setOffices([]);
+      setLoading(false);
+      return;
+    }
+
+    setCompanies(companyResult.data || []);
+
+    // Convert database records into the format used by the UI
+    const companyMap = new Map(
+      (companyResult.data || []).map((company) => [
+        company.id,
+        company.company_name,
+      ])
+    );
+
+    const formattedOffices = (officeResult.data || []).map((office) => ({
+      id: office.id,
+      name: office.office_name,
+      companyId: office.company_id,
+      company: companyMap.get(office.company_id) || "Unknown Company",
+    }));
+
+    setOffices(formattedOffices);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Search offices
   const filteredOffices = useMemo(() => {
     const query = search.toLowerCase().trim();
 
@@ -37,21 +89,38 @@ function OfficeMaster() {
     );
   }, [offices, search]);
 
+  // Open Add form
   function openAddForm() {
     setEditingOffice(null);
     setFormData({ name: "", company: "" });
+    setError("");
     setShowModal(true);
   }
 
+  // Open Edit form
   function openEditForm(office) {
     setEditingOffice(office);
+
     setFormData({
       name: office.name,
-      company: office.company,
+      company: String(office.companyId),
     });
+
+    setError("");
     setShowModal(true);
   }
 
+  // Close modal
+  function closeModal() {
+    if (saving) return;
+
+    setShowModal(false);
+    setEditingOffice(null);
+    setFormData({ name: "", company: "" });
+    setError("");
+  }
+
+  // Handle form input
   function handleInputChange(e) {
     const { name, value } = e.target;
 
@@ -61,12 +130,20 @@ function OfficeMaster() {
     }));
   }
 
-  function handleSubmit(e) {
+  // Add or Update office
+  async function handleSubmit(e) {
     e.preventDefault();
 
     const officeName = formData.name.trim();
+    const companyId = Number(formData.company);
 
     if (!officeName || !formData.company) {
+      setError("Please fill in all fields.");
+      return;
+    }
+
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+      setError("Please select a valid company.");
       return;
     }
 
@@ -77,44 +154,67 @@ function OfficeMaster() {
     );
 
     if (duplicate) {
-      alert("An office with this name already exists.");
+      setError("An office with this name already exists.");
       return;
     }
 
+    setSaving(true);
+    setError("");
+
+    const officeData = {
+      office_name: officeName,
+      company_id: companyId,
+    };
+
+    let result;
+
     if (editingOffice) {
-      setOffices((previous) =>
-        previous.map((office) =>
-          office.id === editingOffice.id
-            ? { ...office, ...formData, name: officeName }
-            : office
-        )
-      );
+      result = await supabase
+        .from("office_master")
+        .update(officeData)
+        .eq("id", editingOffice.id);
     } else {
-      setOffices((previous) => [
-        ...previous,
-        {
-          id: Date.now(),
-          name: officeName,
-          company: formData.company,
-        },
-      ]);
+      result = await supabase
+        .from("office_master")
+        .insert([officeData]);
+    }
+
+    if (result.error) {
+      setError(result.error.message);
+      setSaving(false);
+      return;
     }
 
     setShowModal(false);
     setEditingOffice(null);
     setFormData({ name: "", company: "" });
+
+    await fetchData();
+
+    setSaving(false);
   }
 
-  function handleDelete(id) {
+  // Delete office
+  async function handleDelete(id) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this office?"
     );
 
-    if (confirmed) {
-      setOffices((previous) =>
-        previous.filter((office) => office.id !== id)
-      );
+    if (!confirmed) return;
+
+    setError("");
+
+    const { error } = await supabase
+      .from("office_master")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      setError(error.message);
+      return;
     }
+
+    await fetchData();
   }
 
   return (
@@ -129,10 +229,15 @@ function OfficeMaster() {
           type="button"
           className="add-office-btn"
           onClick={openAddForm}
+          disabled={loading}
         >
           <span>+</span> Add Office
         </button>
       </div>
+
+      {error && !showModal && (
+        <p className="office-error">{error}</p>
+      )}
 
       <div className="office-search">
         <span className="office-search-icon">⌕</span>
@@ -157,7 +262,13 @@ function OfficeMaster() {
           </thead>
 
           <tbody>
-            {filteredOffices.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan="4" className="office-empty">
+                  Loading offices...
+                </td>
+              </tr>
+            ) : filteredOffices.length > 0 ? (
               filteredOffices.map((office, index) => (
                 <tr key={office.id}>
                   <td>{index + 1}</td>
@@ -205,7 +316,7 @@ function OfficeMaster() {
       {showModal && (
         <div
           className="office-modal-overlay"
-          onClick={() => setShowModal(false)}
+          onClick={closeModal}
         >
           <div
             className="office-modal"
@@ -219,7 +330,8 @@ function OfficeMaster() {
               <button
                 type="button"
                 className="office-close-btn"
-                onClick={() => setShowModal(false)}
+                onClick={closeModal}
+                disabled={saving}
               >
                 ×
               </button>
@@ -253,18 +365,26 @@ function OfficeMaster() {
                   <option value="">Select company</option>
 
                   {companies.map((company) => (
-                    <option key={company} value={company}>
-                      {company}
+                    <option
+                      key={company.id}
+                      value={company.id}
+                    >
+                      {company.company_name}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {error && (
+                <p className="office-error">{error}</p>
+              )}
+
               <div className="office-modal-actions">
                 <button
                   type="button"
                   className="office-cancel-btn"
-                  onClick={() => setShowModal(false)}
+                  onClick={closeModal}
+                  disabled={saving}
                 >
                   Cancel
                 </button>
@@ -272,8 +392,13 @@ function OfficeMaster() {
                 <button
                   type="submit"
                   className="office-save-btn"
+                  disabled={saving || companies.length === 0}
                 >
-                  {editingOffice ? "Update Office" : "Save Office"}
+                  {saving
+                    ? "Saving..."
+                    : editingOffice
+                    ? "Update Office"
+                    : "Save Office"}
                 </button>
               </div>
             </form>

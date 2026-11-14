@@ -1,26 +1,54 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabaseClient";
 import "./DesignationMaster.css";
 
-const initialDesignations = [
-  { id: 1, name: "Software Engineer", description: "Software Development" },
-  { id: 2, name: "HR Executive", description: "Human Resources" },
-  { id: 3, name: "Project Manager", description: "Project Management" },
-  { id: 4, name: "Team Lead", description: "Team Management" },
-  { id: 5, name: "Tester", description: "Quality Assurance" },
-];
-
 function DesignationMaster() {
-  const [designations, setDesignations] = useState(initialDesignations);
+  const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingDesignation, setEditingDesignation] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
     description: "",
   });
 
+  // Fetch designations from Supabase
+  async function fetchDesignations() {
+    setLoading(true);
+    setError("");
+
+    const { data, error } = await supabase
+      .from("designation_master")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      setError(error.message);
+      setDesignations([]);
+    } else {
+      setDesignations(
+        (data || []).map((item) => ({
+          id: item.id,
+          name: item.designation_name,
+          description: item.description || "",
+        }))
+      );
+    }
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    fetchDesignations();
+  }, []);
+
+  // Search designations
   const filteredDesignations = useMemo(() => {
     const query = search.toLowerCase().trim();
 
@@ -31,21 +59,38 @@ function DesignationMaster() {
     );
   }, [designations, search]);
 
+  // Open Add form
   function openAddForm() {
     setEditingDesignation(null);
     setFormData({ name: "", description: "" });
+    setError("");
     setShowModal(true);
   }
 
+  // Open Edit form
   function openEditForm(designation) {
     setEditingDesignation(designation);
+
     setFormData({
       name: designation.name,
       description: designation.description,
     });
+
+    setError("");
     setShowModal(true);
   }
 
+  // Close modal
+  function closeModal() {
+    if (saving) return;
+
+    setShowModal(false);
+    setEditingDesignation(null);
+    setFormData({ name: "", description: "" });
+    setError("");
+  }
+
+  // Handle form input
   function handleInputChange(e) {
     const { name, value } = e.target;
 
@@ -55,13 +100,17 @@ function DesignationMaster() {
     }));
   }
 
-  function handleSubmit(e) {
+  // Add or Update designation
+  async function handleSubmit(e) {
     e.preventDefault();
 
     const name = formData.name.trim();
     const description = formData.description.trim();
 
-    if (!name) return;
+    if (!name) {
+      setError("Please enter a designation name.");
+      return;
+    }
 
     const duplicate = designations.some(
       (item) =>
@@ -70,44 +119,67 @@ function DesignationMaster() {
     );
 
     if (duplicate) {
-      alert("This designation already exists.");
+      setError("This designation already exists.");
       return;
     }
 
+    setSaving(true);
+    setError("");
+
+    const designationData = {
+      designation_name: name,
+      description: description || null,
+    };
+
+    let result;
+
     if (editingDesignation) {
-      setDesignations((previous) =>
-        previous.map((item) =>
-          item.id === editingDesignation.id
-            ? { ...item, name, description }
-            : item
-        )
-      );
+      result = await supabase
+        .from("designation_master")
+        .update(designationData)
+        .eq("id", editingDesignation.id);
     } else {
-      setDesignations((previous) => [
-        ...previous,
-        {
-          id: Date.now(),
-          name,
-          description,
-        },
-      ]);
+      result = await supabase
+        .from("designation_master")
+        .insert([designationData]);
+    }
+
+    if (result.error) {
+      setError(result.error.message);
+      setSaving(false);
+      return;
     }
 
     setShowModal(false);
     setEditingDesignation(null);
     setFormData({ name: "", description: "" });
+
+    await fetchDesignations();
+
+    setSaving(false);
   }
 
-  function handleDelete(id) {
+  // Delete designation
+  async function handleDelete(id) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this designation?"
     );
 
-    if (confirmed) {
-      setDesignations((previous) =>
-        previous.filter((item) => item.id !== id)
-      );
+    if (!confirmed) return;
+
+    setError("");
+
+    const { error } = await supabase
+      .from("designation_master")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      setError(error.message);
+      return;
     }
+
+    await fetchDesignations();
   }
 
   return (
@@ -122,10 +194,15 @@ function DesignationMaster() {
           type="button"
           className="add-designation-btn"
           onClick={openAddForm}
+          disabled={loading}
         >
           <span>+</span> Add Designation
         </button>
       </div>
+
+      {error && !showModal && (
+        <p className="designation-error">{error}</p>
+      )}
 
       <div className="designation-search">
         <span className="designation-search-icon">⌕</span>
@@ -150,7 +227,13 @@ function DesignationMaster() {
           </thead>
 
           <tbody>
-            {filteredDesignations.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan="4" className="designation-empty">
+                  Loading designations...
+                </td>
+              </tr>
+            ) : filteredDesignations.length > 0 ? (
               filteredDesignations.map((designation, index) => (
                 <tr key={designation.id}>
                   <td>{index + 1}</td>
@@ -198,7 +281,7 @@ function DesignationMaster() {
       {showModal && (
         <div
           className="designation-modal-overlay"
-          onClick={() => setShowModal(false)}
+          onClick={closeModal}
         >
           <div
             className="designation-modal"
@@ -214,7 +297,8 @@ function DesignationMaster() {
               <button
                 type="button"
                 className="designation-close-btn"
-                onClick={() => setShowModal(false)}
+                onClick={closeModal}
+                disabled={saving}
               >
                 ×
               </button>
@@ -252,11 +336,16 @@ function DesignationMaster() {
                 />
               </div>
 
+              {error && (
+                <p className="designation-error">{error}</p>
+              )}
+
               <div className="designation-modal-actions">
                 <button
                   type="button"
                   className="designation-cancel-btn"
-                  onClick={() => setShowModal(false)}
+                  onClick={closeModal}
+                  disabled={saving}
                 >
                   Cancel
                 </button>
@@ -264,8 +353,13 @@ function DesignationMaster() {
                 <button
                   type="submit"
                   className="designation-save-btn"
+                  disabled={saving}
                 >
-                  {editingDesignation ? "Update Designation" : "Save Designation"}
+                  {saving
+                    ? "Saving..."
+                    : editingDesignation
+                    ? "Update Designation"
+                    : "Save Designation"}
                 </button>
               </div>
             </form>

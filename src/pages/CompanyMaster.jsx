@@ -1,46 +1,76 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "../supabaseClient";
 import "./CompanyMaster.css";
 
-const initialCompanies = [
-  { id: 1, name: "ABC Technologies", description: "IT Services" },
-  { id: 2, name: "XYZ Solutions", description: "Software Development" },
-  { id: 3, name: "Global Tech", description: "Consulting" },
-  { id: 4, name: "Sunrise Group", description: "Finance & Investment" },
-];
-
 function CompanyMaster() {
-  const [companies, setCompanies] = useState(initialCompanies);
+  const [companies, setCompanies] = useState([]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
     description: "",
   });
 
+  // Fetch companies from Supabase
+  const fetchCompanies = async () => {
+    setLoading(true);
+    setError("");
+
+    const { data, error } = await supabase
+      .from("company_master")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      setError(error.message);
+      setCompanies([]);
+    } else {
+      setCompanies(data || []);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchCompanies();
+  }, []);
+
+  // Search companies
   const filteredCompanies = companies.filter((company) =>
-    `${company.name} ${company.description}`
+    `${company.company_name} ${company.description}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
+  // Open Add form
   const openAddForm = () => {
     setEditingId(null);
     setFormData({ name: "", description: "" });
+    setError("");
     setShowForm(true);
   };
 
+  // Open Edit form
   const openEditForm = (company) => {
     setEditingId(company.id);
+
     setFormData({
-      name: company.name,
+      name: company.company_name,
       description: company.description,
     });
+
+    setError("");
     setShowForm(true);
   };
 
+  // Handle form input
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -48,48 +78,72 @@ function CompanyMaster() {
     });
   };
 
-  const handleSubmit = (e) => {
+  // Add or Update company
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!formData.name.trim() || !formData.description.trim()) {
-      alert("Please fill in all fields.");
+      setError("Please fill in all fields.");
       return;
     }
 
+    setSaving(true);
+    setError("");
+
+    const companyData = {
+      company_name: formData.name.trim(),
+      description: formData.description.trim(),
+    };
+
+    let result;
+
     if (editingId !== null) {
-      setCompanies((previous) =>
-        previous.map((company) =>
-          company.id === editingId
-            ? { ...company, ...formData }
-            : company
-        )
-      );
+      result = await supabase
+        .from("company_master")
+        .update(companyData)
+        .eq("id", editingId);
     } else {
-      setCompanies((previous) => [
-        ...previous,
-        {
-          id: Date.now(),
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-        },
-      ]);
+      result = await supabase
+        .from("company_master")
+        .insert([companyData]);
+    }
+
+    if (result.error) {
+      setError(result.error.message);
+      setSaving(false);
+      return;
     }
 
     setShowForm(false);
     setEditingId(null);
     setFormData({ name: "", description: "" });
+
+    await fetchCompanies();
+
+    setSaving(false);
   };
 
-  const handleDelete = (id) => {
+  // Delete company
+  const handleDelete = async (id) => {
     const confirmed = window.confirm(
       "Are you sure you want to delete this company?"
     );
 
-    if (confirmed) {
-      setCompanies((previous) =>
-        previous.filter((company) => company.id !== id)
-      );
+    if (!confirmed) return;
+
+    setError("");
+
+    const { error } = await supabase
+      .from("company_master")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      setError(error.message);
+      return;
     }
+
+    await fetchCompanies();
   };
 
   return (
@@ -102,8 +156,13 @@ function CompanyMaster() {
         </button>
       </div>
 
+      {error && !showForm && (
+        <p className="company-error">{error}</p>
+      )}
+
       <div className="company-search">
         <span className="search-icon">⌕</span>
+
         <input
           type="text"
           placeholder="Search company..."
@@ -124,30 +183,40 @@ function CompanyMaster() {
           </thead>
 
           <tbody>
-            {filteredCompanies.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan="4" className="company-empty">
+                  Loading companies...
+                </td>
+              </tr>
+            ) : filteredCompanies.length > 0 ? (
               filteredCompanies.map((company, index) => (
                 <tr key={company.id}>
                   <td>{index + 1}</td>
-                  <td className="company-name-cell">{company.name}</td>
+
+                  <td className="company-name-cell">
+                    {company.company_name}
+                  </td>
+
                   <td>{company.description}</td>
 
                   <td>
                     <div className="company-action-buttons">
-                   <button
-  className="company-edit-btn"
-  title="Edit"
-  onClick={() => openEditForm(company)}
->
-  ✎
-</button>
+                      <button
+                        className="company-edit-btn"
+                        title="Edit"
+                        onClick={() => openEditForm(company)}
+                      >
+                        ✎
+                      </button>
 
-<button
-  className="company-delete-btn"
-  title="Delete"
-  onClick={() => handleDelete(company.id)}
->
-  🗑
-</button>
+                      <button
+                        className="company-delete-btn"
+                        title="Delete"
+                        onClick={() => handleDelete(company.id)}
+                      >
+                        🗑
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -173,7 +242,10 @@ function CompanyMaster() {
 
               <button
                 className="company-close-btn"
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setError("");
+                }}
               >
                 ×
               </button>
@@ -182,6 +254,7 @@ function CompanyMaster() {
             <form onSubmit={handleSubmit}>
               <div className="company-form-group">
                 <label>Company Name</label>
+
                 <input
                   type="text"
                   name="name"
@@ -194,6 +267,7 @@ function CompanyMaster() {
 
               <div className="company-form-group">
                 <label>Description</label>
+
                 <textarea
                   name="description"
                   placeholder="Enter company description"
@@ -204,17 +278,33 @@ function CompanyMaster() {
                 />
               </div>
 
+              {error && (
+                <p className="company-error">{error}</p>
+              )}
+
               <div className="company-modal-actions">
                 <button
                   type="button"
                   className="company-cancel-btn"
-                  onClick={() => setShowForm(false)}
+                  onClick={() => {
+                    setShowForm(false);
+                    setError("");
+                  }}
+                  disabled={saving}
                 >
                   Cancel
                 </button>
 
-                <button type="submit" className="company-save-btn">
-                  {editingId !== null ? "Update Company" : "Save Company"}
+                <button
+                  type="submit"
+                  className="company-save-btn"
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingId !== null
+                    ? "Update Company"
+                    : "Save Company"}
                 </button>
               </div>
             </form>

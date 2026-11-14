@@ -1,0 +1,5 @@
+[functions.manage-login]
+enabled = true
+verify_jwt = true
+import_map = "./functions/manage-login/deno.json"
+entrypoint = "./functions/manage-login/index.ts"

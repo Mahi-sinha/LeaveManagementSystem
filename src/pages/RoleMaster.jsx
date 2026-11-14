@@ -1,51 +1,59 @@
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabaseClient";
 
-const initialRoles = [
-  {
-    id: 1,
-    roleId: "ROLE-1",
-    name: "Employee",
-    description: "Can apply for leave and track applications.",
-    status: "Active",
-  },
-  {
-    id: 2,
-    roleId: "ROLE-2",
-    name: "Reporting Officer",
-    description: "Reviews and forwards employee leave applications.",
-    status: "Active",
-  },
-  {
-    id: 3,
-    roleId: "ROLE-3",
-    name: "Approving Officer",
-    description: "Provides final approval or rejection of leave applications.",
-    status: "Active",
-  },
-  {
-    id: 4,
-    roleId: "ROLE-4",
-    name: "Admin",
-    description: "Manages company and employee master information.",
-    status: "Active",
-  },
-];
+const emptyForm = {
+  name: "",
+  description: "",
+  status: "Active",
+};
 
 function RoleMaster() {
-  const [roles, setRoles] = useState(initialRoles);
+  const [roles, setRoles] = useState([]);
   const [search, setSearch] = useState("");
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-
-  const emptyForm = {
-    name: "",
-    description: "",
-    status: "Active",
-  };
-
   const [form, setForm] = useState(emptyForm);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+
+  // FETCH ROLES FROM SUPABASE
+  async function fetchRoles() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const { data, error } = await supabase
+        .from("role_master")
+        .select("id, role_id, role_name, description, status")
+        .order("id");
+
+      if (error) throw error;
+
+      const formattedRoles = (data || []).map((role) => ({
+        id: role.id,
+        roleId: role.role_id,
+        name: role.role_name,
+        description: role.description || "",
+        status: role.status,
+      }));
+
+      setRoles(formattedRoles);
+    } catch (err) {
+      console.error("Role fetch error:", err);
+      setError(err.message || "Unable to load roles.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchRoles();
+  }, []);
 
   // STATISTICS
   const totalRoles = roles.length;
@@ -59,11 +67,15 @@ function RoleMaster() {
   ).length;
 
   // SEARCH ROLES
-  const filteredRoles = roles.filter((role) =>
-    `${role.roleId} ${role.name} ${role.description} ${role.status}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  const filteredRoles = useMemo(() => {
+    const query = search.toLowerCase().trim();
+
+    return roles.filter((role) =>
+      `${role.roleId} ${role.name} ${role.description} ${role.status}`
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [roles, search]);
 
   // FORM INPUT HANDLER
   function handleChange(e) {
@@ -73,27 +85,40 @@ function RoleMaster() {
       ...previous,
       [name]: value,
     }));
+
+    setFormError("");
   }
 
   // OPEN ADD ROLE FORM
   function handleAddRole() {
     setForm(emptyForm);
     setEditingId(null);
+    setFormError("");
     setShowForm(true);
   }
 
   // CLOSE FORM
   function handleCloseForm() {
+    if (saving) return;
+
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setFormError("");
   }
 
   // SAVE ROLE
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setFormError("");
 
     const trimmedName = form.name.trim();
+    const trimmedDescription = form.description.trim();
+
+    if (!trimmedName || !trimmedDescription) {
+      setFormError("Please fill in all required fields.");
+      return;
+    }
 
     const duplicate = roles.some(
       (role) =>
@@ -102,44 +127,52 @@ function RoleMaster() {
     );
 
     if (duplicate) {
-      alert("This role already exists.");
+      setFormError("This role already exists.");
       return;
     }
 
-    if (editingId !== null) {
-      // UPDATE EXISTING ROLE
-      setRoles((previous) =>
-        previous.map((role) =>
-          role.id === editingId
-            ? {
-                ...role,
-                name: trimmedName,
-                description: form.description.trim(),
-                status: form.status,
-              }
-            : role
-        )
-      );
-    } else {
-      // CREATE NEW ROLE
-      const nextRoleNumber =
-        roles.reduce((max, role) => {
-          const number = Number(role.roleId.replace("ROLE-", ""));
-          return Math.max(max, number);
-        }, 0) + 1;
+    setSaving(true);
 
-      const newRole = {
-        id: Date.now(),
-        roleId: `ROLE-${nextRoleNumber}`,
-        name: trimmedName,
-        description: form.description.trim(),
-        status: form.status,
-      };
+    try {
+      let result;
 
-      setRoles((previous) => [...previous, newRole]);
+      if (editingId !== null) {
+        // UPDATE EXISTING ROLE
+        result = await supabase
+          .from("role_master")
+          .update({
+            role_name: trimmedName,
+            description: trimmedDescription,
+            status: form.status,
+          })
+          .eq("id", editingId);
+      } else {
+        // INSERT NEW ROLE
+        // role_id is generated by the database.
+        result = await supabase
+          .from("role_master")
+          .insert([
+            {
+              role_name: trimmedName,
+              description: trimmedDescription,
+              status: form.status,
+            },
+          ]);
+      }
+
+      if (result.error) throw result.error;
+
+      await fetchRoles();
+
+      setShowForm(false);
+      setEditingId(null);
+      setForm(emptyForm);
+    } catch (err) {
+      console.error("Role save error:", err);
+      setFormError(err.message || "Unable to save role.");
+    } finally {
+      setSaving(false);
     }
-
-    handleCloseForm();
   }
 
   // EDIT ROLE
@@ -151,37 +184,87 @@ function RoleMaster() {
     });
 
     setEditingId(role.id);
+    setFormError("");
     setShowForm(true);
   }
 
   // ACTIVATE / DEACTIVATE ROLE
-  function toggleStatus(id) {
-    setRoles((previous) =>
-      previous.map((role) =>
-        role.id === id
-          ? {
-              ...role,
-              status:
-                role.status === "Active"
-                  ? "Inactive"
-                  : "Active",
-            }
-          : role
-      )
-    );
-  }
+  async function toggleStatus(role) {
+    const newStatus =
+      role.status === "Active" ? "Inactive" : "Active";
 
-  // DELETE ROLE
-  function handleDelete(id) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this role?"
+      `Are you sure you want to ${newStatus === "Active" ? "activate" : "deactivate"} the ${role.name} role?`
     );
 
     if (!confirmed) return;
 
-    setRoles((previous) =>
-      previous.filter((role) => role.id !== id)
+    setError("");
+
+    try {
+      const { error } = await supabase
+        .from("role_master")
+        .update({ status: newStatus })
+        .eq("id", role.id);
+
+      if (error) throw error;
+
+      await fetchRoles();
+    } catch (err) {
+      console.error("Role status update error:", err);
+      setError(err.message || "Unable to update role status.");
+    }
+  }
+
+  // DELETE ROLE
+  async function handleDelete(role) {
+    if (role.name.toLowerCase() === "admin") {
+      alert("The Admin role cannot be deleted.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the ${role.name} role?`
     );
+
+    if (!confirmed) return;
+
+    setError("");
+
+    try {
+      // Check whether this role is assigned to any login.
+      const { data: assignedLogins, error: checkError } =
+        await supabase
+          .from("login_master")
+          .select("login_id")
+          .eq("role_id", role.id)
+          .limit(1);
+
+      if (checkError) throw checkError;
+
+      if (assignedLogins && assignedLogins.length > 0) {
+        setError(
+          "This role is assigned to an employee login and cannot be deleted. Deactivate it instead."
+        );
+        return;
+      }
+
+      const { error } = await supabase
+        .from("role_master")
+        .delete()
+        .eq("id", role.id);
+
+      if (error) throw error;
+
+      await fetchRoles();
+    } catch (err) {
+      console.error("Role delete error:", err);
+
+      setError(
+        err.message ||
+          "Unable to delete role. It may be referenced by another record."
+      );
+    }
   }
 
   return (
@@ -247,6 +330,11 @@ function RoleMaster() {
         </div>
 
       </div>
+
+      {/* ERROR MESSAGE */}
+      {error && (
+        <p className="employee-form-error">{error}</p>
+      )}
 
       {/* ADD / EDIT ROLE FORM */}
       {showForm && (
@@ -329,12 +417,17 @@ function RoleMaster() {
 
             </div>
 
+            {formError && (
+              <p className="employee-form-error">{formError}</p>
+            )}
+
             <div className="master-actions">
 
               <button
                 type="button"
                 className="master-cancel-btn"
                 onClick={handleCloseForm}
+                disabled={saving}
               >
                 Cancel
               </button>
@@ -342,10 +435,13 @@ function RoleMaster() {
               <button
                 type="submit"
                 className="master-primary-btn"
+                disabled={saving}
               >
-                {editingId !== null
-                  ? "Update Role"
-                  : "Save Role"}
+                {saving
+                  ? "Saving..."
+                  : editingId !== null
+                    ? "Update Role"
+                    : "Save Role"}
               </button>
 
             </div>
@@ -394,7 +490,13 @@ function RoleMaster() {
 
             <tbody>
 
-              {filteredRoles.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan="5" className="master-empty">
+                    Loading roles...
+                  </td>
+                </tr>
+              ) : filteredRoles.length > 0 ? (
 
                 filteredRoles.map((role) => (
 
@@ -408,7 +510,6 @@ function RoleMaster() {
 
                     <td>{role.description}</td>
 
-                    {/* STATUS */}
                     <td>
                       <span
                         className={`role-status-badge ${
@@ -422,7 +523,6 @@ function RoleMaster() {
                       </span>
                     </td>
 
-                    {/* ACTIONS */}
                     <td>
                       <div className="role-row-actions">
 
@@ -437,7 +537,7 @@ function RoleMaster() {
                         <button
                           type="button"
                           className="role-toggle-btn"
-                          onClick={() => toggleStatus(role.id)}
+                          onClick={() => toggleStatus(role)}
                         >
                           {role.status === "Active"
                             ? "Deactivate"
@@ -447,7 +547,7 @@ function RoleMaster() {
                         <button
                           type="button"
                           className="role-delete-btn"
-                          onClick={() => handleDelete(role.id)}
+                          onClick={() => handleDelete(role)}
                         >
                           Delete
                         </button>
