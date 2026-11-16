@@ -26,52 +26,54 @@ function LoginMaster() {
   const [error, setError] = useState("");
 
   // LOAD DATABASE RECORDS
+
   async function loadData() {
     setLoading(true);
     setError("");
 
-    const [loginResult, employeeResult, roleResult] =
-      await Promise.all([
-        supabase
-          .from("login_master")
-          .select(
-            "login_id, employee_name, email, role_id, status, employee_id"
-          )
-          .order("login_id"),
+    try {
+      const [loginResult, employeeResult, roleResult] =
+        await Promise.all([
+          supabase
+            .from("login_master")
+            .select("login_id, employee_name, email, role_id, status, employee_id")
+            .order("login_id"),
 
-        supabase
-          .from("employee_master")
-          .select("employee_id, employee_name")
-          .order("employee_name"),
+          supabase
+            .from("employee_master")
+            .select("employee_id, employee_name")
+            .order("employee_name"),
 
-        supabase
-          .from("role_master")
-          .select("id, role_name, status")
-          .order("id"),
-      ]);
+          supabase
+            .from("role_master")
+            .select("id, role_name, status")
+            .order("id"),
+        ]);
 
-    if (
-      loginResult.error ||
-      employeeResult.error ||
-      roleResult.error
-    ) {
-      setError(
-        loginResult.error?.message ||
-        employeeResult.error?.message ||
-        roleResult.error?.message ||
-        "Unable to load login data."
-      );
+      if (loginResult.error) throw loginResult.error;
+      if (employeeResult.error) throw employeeResult.error;
+      if (roleResult.error) throw roleResult.error;
 
+      setLogins(loginResult.data || []);
+      setEmployees(employeeResult.data || []);
+      setRoles(roleResult.data || []);
+
+      console.log("Employees:", employeeResult.data);
+      console.log("Roles:", roleResult.data);
+      console.log("Login accounts:", loginResult.data);
+
+    } catch (err) {
+      console.error("Login Master loading error:", err);
+      setError(err.message || "Unable to load data from Supabase.");
+
+      setEmployees([]);
+      setRoles([]);
+      setLogins([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setLogins(loginResult.data || []);
-    setEmployees(employeeResult.data || []);
-    setRoles(roleResult.data || []);
-
-    setLoading(false);
   }
+
 
   useEffect(() => {
     loadData();
@@ -449,13 +451,7 @@ function LoginMaster() {
                 >
                   <option value="">Select Employee</option>
 
-                  {(editingId !== null
-                    ? employees.filter(
-                        (employee) =>
-                          employee.employee_id === form.employeeId
-                      )
-                    : availableEmployees
-                  ).map((employee) => (
+                  {availableEmployees.map((employee) => (
                     <option
                       key={employee.employee_id}
                       value={employee.employee_id}
@@ -505,13 +501,13 @@ function LoginMaster() {
                   {roles
                     .filter(
                       (role) =>
-                        role.status?.toLowerCase() === "active" &&
-                        role.role_name.toLowerCase() !== "admin"
+                        String(role.status || "").trim().toLowerCase() === "active" &&
+                        String(role.role_name || "").trim().toLowerCase() !== "admin"
                     )
                     .map((role) => (
                       <option
                         key={role.id}
-                        value={role.id}
+                        value={String(role.id)}
                       >
                         {role.role_name}
                       </option>

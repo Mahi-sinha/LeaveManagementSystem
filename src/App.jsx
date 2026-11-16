@@ -28,59 +28,7 @@ import LeaveStatus from "./pages/LeaveStatus";
 import Dashboard from "./pages/Dashboard";
 
 // Initial sample applications
-const initialApplications = [
-  {
-    id: 1,
-    type: "Casual Leave",
-    dates: "20 Oct – 21 Oct",
-    startDate: "20 Oct",
-    endDate: "21 Oct",
-    days: 2,
-    status: "Pending",
-    reason: "Personal work",
-    employeeName: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Employee",
-    department: "Engineering",
-    submittedBy: "employee",
-    submittedById: "EMP001",
-    document: null,
-  },
-  {
-    id: 2,
-    type: "Sick Leave",
-    dates: "12 Oct – 12 Oct",
-    startDate: "12 Oct",
-    endDate: "12 Oct",
-    days: 1,
-    status: "Approved",
-    reason: "Medical appointment",
-    employeeName: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Employee",
-    department: "Engineering",
-    submittedBy: "employee",
-    submittedById: "EMP001",
-    document: null,
-  },
-  {
-    id: 3,
-    type: "Earned Leave",
-    dates: "5 Oct – 7 Oct",
-    startDate: "5 Oct",
-    endDate: "7 Oct",
-    days: 3,
-    status: "Rejected",
-    reason: "Personal reasons",
-    employeeName: "Anushka Jha",
-    employeeId: "EMP001",
-    designation: "Employee",
-    department: "Engineering",
-    submittedBy: "employee",
-    submittedById: "EMP001",
-    document: null,
-  },
-];
+
 
 function App() {
   // AUTHENTICATION
@@ -107,9 +55,9 @@ function App() {
   const [previousPage, setPreviousPage] = useState("my-applications");
 
   // APPLICATION DATA
-  const [myApplications, setMyApplications] = useState(
-    initialApplications
-  );
+  const [myApplications, setMyApplications] = useState([]);
+  const [leaveTypes, setLeaveTypes] = useState([])
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Detect a Supabase password-recovery session.
   useEffect(() => {
@@ -144,6 +92,79 @@ function App() {
   const isAdmin = userRole === "admin";
 
   // LOGIN WITH SUPABASE AUTHENTICATION
+  async function loadLeaveTypes() {
+  const { data, error } = await supabase
+    .from("leave_type_master")
+    .select("id, leave_name")
+    .order("id");
+
+  console.log("Leave types:", data);
+  console.log("Leave types error:", error);
+
+  if (error) throw error;
+
+  setLeaveTypes(data || []);
+  }
+
+  async function loadApplications() {
+    const { data, error } = await supabase
+      .from("leave_details")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const { data: types, error: typeError } = await supabase
+      .from("leave_type_master")
+      .select("id, leave_name");
+
+    if (typeError) throw typeError;
+
+    const { data: employees, error: employeeError } = await supabase
+      .from("employee_master")
+      .select(`
+        employee_id,
+        employee_name,
+        designation:designation_master!employee_master_designation_id_fkey (
+          designation_name
+        ),
+        office:office_master!employee_master_office_id_fkey (
+          office_name
+        )
+      `);
+
+    if (employeeError) throw employeeError;
+
+    const formatted = (data || []).map((app) => {
+      const employee = employees.find(
+        (emp) => emp.employee_id === app.employee_id
+      );
+
+      return {
+        id: app.id,
+        type: types.find((t) => t.id === app.leave_type_id)?.leave_name || "Unknown",
+        startDate: app.start_date,
+        endDate: app.end_date,
+        days: Number(app.total_days),
+        dates: `${app.start_date} – ${app.end_date}`,
+        status: app.status,
+        reason: app.reason,
+
+        employeeId: app.employee_id,
+        employeeName: employee?.employee_name || "Unknown employee",
+        designation: employee?.designation?.designation_name || "Not specified",
+        office: employee?.office?.office_name || "Not specified",
+
+        reportingOfficerId: app.reporting_officer_id,
+        approvingOfficerId: app.approving_officer_id,
+        officerRemarks: app.reporting_officer_remarks,
+        approvingOfficerRemarks: app.approving_officer_remarks,
+        documentName: app.attachment_path || "",
+      };
+    });
+
+    setMyApplications(formatted);
+  }
   
   // LOGIN WITH SUPABASE AUTHENTICATION
   async function handleLogin(e) {
@@ -288,6 +309,8 @@ function App() {
       setCurrentUser(user);
       setUserRole(role);
       setLoggedIn(true);
+      await loadLeaveTypes();
+      await loadApplications();
 
       setSelectedApplication(null);
 
@@ -390,55 +413,85 @@ function App() {
     setSelectedApplication(null);
   }
     // SUBMIT LEAVE APPLICATION
-  function handleLeaveSubmit(newApplication) {
-    const isOfficerApplication =
-      userRole === "reporting-officer";
+  async function handleLeaveSubmit(newApplication) {
+    setIsSubmitting(true);
+    setError("");
 
-    const submittedApplication = {
-      ...newApplication,
-      id: Date.now(),
-      employeeName: currentUser?.name || "",
-      employeeId: currentUser?.employeeId || "",
-      designation: currentUser?.designation || "",
-      department: currentUser?.department || "",
-      submittedBy: userRole,
-      submittedById: currentUser?.employeeId || "",
+    try {
+      // Get the current employee's officer assignments.
+      const { data: assignment, error: assignmentError } =
+        await supabase
+          .from("employee_reporting_map")
+          .select("reporting_officer_id, approving_officer_id")
+          .eq("employee_id", currentUser.employeeId)
+          .eq("is_active", true)
+          .maybeSingle();
 
-      // Reporting Officer applications go directly
-      // to the Approving Officer.
-      status: isOfficerApplication ? "Forwarded" : "Pending",
+      if (assignmentError) throw assignmentError;
 
-      ...(isOfficerApplication && {
-        reportingOfficer: currentUser?.name || "",
-      }),
-    };
+      if (!assignment) {
+        throw new Error(
+          "No active reporting/approving officer assignment exists for your account."
+        );
+      }
 
-    setMyApplications((previous) => [
-      submittedApplication,
-      ...previous,
-    ]);
+      // Do not silently discard an attachment before Storage is configured.
+      if (newApplication.document) {
+        throw new Error(
+          "Supporting document upload is not configured yet. Please submit without an attachment for now."
+        );
+      }
 
-    setCurrentPage("my-applications");
+      const { data, error: insertError } = await supabase
+        .from("leave_details")
+        .insert({
+          employee_id: currentUser.employeeId,
+          leave_type_id: Number(newApplication.type),
+          start_date: newApplication.startDate,
+          end_date: newApplication.endDate,
+          total_days: newApplication.days,
+          reason: newApplication.reason,
+          status: "Pending",
+          reporting_officer_id: assignment.reporting_officer_id,
+          approving_officer_id: assignment.approving_officer_id,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      await loadApplications();
+      setCurrentPage("my-applications");
+
+      return true;
+    } catch (err) {
+      console.error("Leave submission failed:", err);
+      setError(err.message || "Unable to submit leave application.");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   // APPLICATIONS BELONGING TO CURRENT USER
   const ownApplications = myApplications.filter(
-    (application) =>
-      application.submittedBy === userRole &&
-      application.submittedById === currentUser?.employeeId
+  (application) =>
+    application.employeeId === currentUser?.employeeId
   );
 
   // EMPLOYEE APPLICATIONS FOR REPORTING OFFICER
   const employeeApplications = myApplications.filter(
     (application) =>
-      application.submittedBy === "employee"
+      application.reportingOfficerId === currentUser?.employeeId &&
+      application.status === "Pending"
   );
 
   // APPLICATIONS FOR APPROVING OFFICER
   const forwardedApplications = myApplications.filter(
     (application) =>
+      application.approvingOfficerId === currentUser?.employeeId &&
       application.status === "Forwarded"
-  );
+  );  
 
   // OPEN APPLICATION DETAILS
   function handleViewDetails(application) {
@@ -459,22 +512,39 @@ function App() {
   }
 
   // REPORTING OFFICER DECISION
-  function handleOfficerDecision(applicationId, status, remarks) {
-    setMyApplications((previous) =>
-      previous.map((application) =>
-        application.id === applicationId
-          ? {
-              ...application,
-              status,
-              officerRemarks: remarks,
-              reportingOfficer: currentUser?.name || "",
-            }
-          : application
-      )
-    );
+  async function handleOfficerDecision(applicationId, status, remarks) {
+    try {
+      const decision =
+        status === "Forwarded"
+          ? "forward"
+          : status === "Rejected"
+          ? "reject"
+          : null;
 
-    setSelectedApplication(null);
-    setCurrentPage("review-applications");
+      if (!decision) {
+        throw new Error("Invalid reporting officer decision.");
+      }
+
+      const { error } = await supabase.rpc(
+        "reporting_officer_decision",
+        {
+          p_application_id: applicationId,
+          p_decision: decision,
+          p_remarks: remarks || null,
+        }
+      );
+
+      if (error) throw error;
+
+      await loadApplications();
+
+      setSelectedApplication(null);
+      setCurrentPage("reporting-dashboard");
+
+    } catch (err) {
+      console.error("Reporting decision failed:", err);
+      alert(err.message || "Unable to process application.");
+    }
   }
 
   // APPROVING OFFICER REVIEW
@@ -489,26 +559,39 @@ function App() {
   }
 
   // APPROVING OFFICER FINAL DECISION
-  function handleApprovingOfficerDecision(
+  async function handleApprovingOfficerDecision(
     applicationId,
     status,
     remarks
   ) {
-    setMyApplications((previous) =>
-      previous.map((application) =>
-        application.id === applicationId
-          ? {
-              ...application,
-              status,
-              approvingOfficerRemarks: remarks,
-              approvingOfficer: currentUser?.name || "",
-            }
-          : application
-      )
-    );
+    try {
+      const decision =
+        status === "Approved" ? "approve" :
+        status === "Rejected" ? "reject" : null;
 
-    setSelectedApplication(null);
-    setCurrentPage("approving-dashboard");
+      if (!decision) {
+        throw new Error("Invalid approving officer decision.");
+      }
+
+      const { error } = await supabase.rpc(
+        "approving_officer_decision",
+        {
+          p_application_id: applicationId,
+          p_decision: decision,
+          p_remarks: remarks || null,
+        }
+      );
+
+      if (error) throw error;
+
+      await loadApplications();
+
+      setSelectedApplication(null);
+      setCurrentPage("approving-dashboard");
+    } catch (err) {
+      console.error("Approving officer decision failed:", err);
+      alert(err.message || "Unable to process application.");
+    }
   }
 
   // BACK FROM APPLICATION DETAILS
@@ -1019,6 +1102,8 @@ function App() {
           <ApplyLeave
             onSubmit={handleLeaveSubmit}
             onCancel={() => navigateTo("dashboard")}
+            leaveTypes={leaveTypes}
+            submitting={isSubmitting}
           />
         ) : currentPage === "my-applications" ? (
           <MyApplications
@@ -1046,6 +1131,8 @@ function App() {
           <ApplyLeave
             onSubmit={handleLeaveSubmit}
             onCancel={() => navigateTo("reporting-dashboard")}
+            leaveTypes={leaveTypes}
+            submitting={isSubmitting}
           />
         ) : currentPage === "my-applications" ? (
           <MyApplications

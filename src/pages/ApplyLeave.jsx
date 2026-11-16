@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 
-function ApplyLeave({ onSubmit, onCancel }) {
+function ApplyLeave({ onSubmit, onCancel, leaveTypes, submitting, }) {
   const [leaveType, setLeaveType] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -10,6 +10,7 @@ function ApplyLeave({ onSubmit, onCancel }) {
   const [attachedDocument, setAttachedDocument] = useState(null);
   const [documentError, setDocumentError] = useState("");
   const [error, setError] = useState("");
+  const [submitError, setSubmitError] = useState("");
 
   // Today's date in local YYYY-MM-DD format
   const today = new Date();
@@ -61,9 +62,10 @@ function ApplyLeave({ onSubmit, onCancel }) {
   }
 
   // Submit leave application
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setSubmitError("");
 
     if (!leaveType || !startDate || !endDate || !reason.trim()) {
       setError("Please complete all required fields.");
@@ -108,20 +110,25 @@ function ApplyLeave({ onSubmit, onCancel }) {
         ? formatDate(startDate)
         : `${formatDate(startDate)} – ${formatDate(endDate)}`;
 
-    onSubmit({
-      id: Date.now(),
-      type: leaveType,
-      startDate,
-      endDate,
-      dates: formattedDates,
-      days,
-      status: "Pending",
-      reason: reason.trim(),
-      document: attachedDocument,
-      documentName: attachedDocument?.name || "",
-    });
+    let success;
 
-    // Reset the form after submission
+    try {
+      success = await onSubmit({
+        type: leaveType,
+        startDate,
+        endDate,
+        days,
+        reason: reason.trim(),
+        document: attachedDocument,
+      });
+    } catch (err) {
+      setSubmitError(err.message || "Submission failed.");
+      return;
+    }
+
+    if (!success) return;
+
+    // Reset only after successful submission
     setLeaveType("");
     setStartDate("");
     setEndDate("");
@@ -160,11 +167,13 @@ function ApplyLeave({ onSubmit, onCancel }) {
               }}
               required
             >
+              
               <option value="">Select leave type</option>
-              <option value="Casual Leave">Casual Leave</option>
-              <option value="Sick Leave">Sick Leave</option>
-              <option value="Earned Leave">Earned Leave</option>
-              <option value="Paid Leave">Paid Leave</option>
+              {leaveTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.leave_name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -309,6 +318,11 @@ function ApplyLeave({ onSubmit, onCancel }) {
               {error}
             </p>
           )}
+          {submitError && (
+            <p className="form-message error" role="alert">
+              {submitError}
+            </p>
+          )}
 
           {/* Form Actions */}
           <div className="form-actions">
@@ -320,8 +334,12 @@ function ApplyLeave({ onSubmit, onCancel }) {
               Cancel
             </button>
 
-            <button type="submit" className="primary-action">
-              Submit Application →
+            <button
+              type="submit"
+              className="primary-action"
+              disabled={submitting}
+            >
+              {submitting ? "Submitting..." : "Submit Application →"}
             </button>
           </div>
         </form>
