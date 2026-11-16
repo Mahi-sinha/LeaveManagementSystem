@@ -129,7 +129,7 @@ function ReportingOfficerReview({
                   </div>
 
                   <div className="review-queue-info">
-                    <strong>{item.employeeName || "Anushka Jha"}</strong>
+                    <strong>{item.employeeName || "Unknown employee"}</strong>
                     <span>
                       {item.employeeId || "EMP001"} · {item.type}
                     </span>
@@ -157,8 +157,8 @@ function ReportingOfficerReview({
     );
   }
 
-  const employeeName = application.employeeName || "Anushka Jha";
-  const employeeId = application.employeeId || "EMP001";
+  const employeeName = application.employeeName || "Unknown employee";
+  const employeeId = application.employeeId || "-";
 
   function handleDecision(status) {
     if (status === "Rejected" && !remarks.trim()) {

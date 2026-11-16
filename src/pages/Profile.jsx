@@ -1,19 +1,11 @@
 
 import { useState } from "react";
 import "./Profile.css";
+import { supabase } from "../supabaseClient";
 
-function Profile({ currentUser, onCancel }) {
-  const [isEditing, setIsEditing] = useState(false);
+function Profile({ currentUser }) {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
-
-  const [profile, setProfile] = useState({
-    name: currentUser?.name || "",
-    employeeId: currentUser?.employeeId || "",
-    email: currentUser?.email || "",
-    phone: currentUser?.phone || "",
-    designation: currentUser?.designation || "",
-    department: currentUser?.department || "",
-  });
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   const [passwords, setPasswords] = useState({
     current: "",
@@ -22,6 +14,15 @@ function Profile({ currentUser, onCancel }) {
   });
 
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("");
+
+  const profile = {
+    name: currentUser?.name || "",
+    employeeId: currentUser?.employeeId || "",
+    email: currentUser?.email || "",
+    designation: currentUser?.designation || "",
+    department: currentUser?.department || "",
+  };
 
   const initials = profile.name
     .split(" ")
@@ -31,19 +32,9 @@ function Profile({ currentUser, onCancel }) {
     .slice(0, 2)
     .toUpperCase();
 
-  function handleProfileChange(e) {
-    const { name, value } = e.target;
-
-    setProfile((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  }
-
-  function handleSaveProfile(e) {
-    e.preventDefault();
-    setIsEditing(false);
-    setMessage("Profile updated successfully!");
+  function showFeedback(text, type = "error") {
+    setMessage(text);
+    setMessageType(type);
   }
 
   function handlePasswordChange(e) {
@@ -55,30 +46,88 @@ function Profile({ currentUser, onCancel }) {
     }));
   }
 
-  function handlePasswordSubmit(e) {
+  async function handlePasswordSubmit(e) {
     e.preventDefault();
 
+    setMessage("");
+    setMessageType("");
+
+    // 1. Validate current password
+    if (!passwords.current) {
+      showFeedback("Please enter your current password.");
+      return;
+    }
+
+    // 2. Validate new password length
     if (passwords.new.length < 8) {
-      setMessage("Password must contain at least 8 characters.");
+      showFeedback("Password must contain at least 8 characters.");
       return;
     }
 
+    // 3. Validate password confirmation
     if (passwords.new !== passwords.confirm) {
-      setMessage("New passwords do not match.");
+      showFeedback("New passwords do not match.");
       return;
     }
 
-    setMessage(
-      "Password validated. Connect authentication to save the new password."
-    );
+    // 4. Prevent reusing the current password
+    if (passwords.current === passwords.new) {
+      showFeedback("New password must be different from current password.");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
+    try {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: currentUser?.email,
+        password: passwords.current,
+      });
+
+      if (verifyError) {
+        showFeedback("Current password is incorrect.");
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        password: passwords.new,
+        current_password: passwords.current,
+      });
+
+      if (error) {
+        showFeedback("Password update failed: " + error.message);
+        return;
+      }
+
+      showFeedback("Password changed successfully!", "success");
+
+      setPasswords({
+        current: "",
+        new: "",
+        confirm: "",
+      });
+    } catch (error) {
+      showFeedback(
+        error?.message || "Something went wrong while updating your password."
+      );
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  }
+
+  function togglePasswordForm() {
+    if (isUpdatingPassword) return;
+
+    setShowPasswordForm((previous) => !previous);
+
+    setMessage("");
+    setMessageType("");
 
     setPasswords({
       current: "",
       new: "",
       confirm: "",
     });
-
-    setShowPasswordForm(false);
   }
 
   return (
@@ -90,13 +139,6 @@ function Profile({ currentUser, onCancel }) {
         </div>
       </div>
 
-      {message && (
-        <div className="profile-message">
-          {message}
-          <button onClick={() => setMessage("")}>×</button>
-        </div>
-      )}
-
       <div className="profile-layout">
         {/* PROFILE OVERVIEW */}
         <div className="profile-overview-card">
@@ -107,8 +149,9 @@ function Profile({ currentUser, onCancel }) {
           </div>
 
           <h2>{profile.name}</h2>
+
           <p className="profile-role">
-            {currentUser?.designation || "User"}
+            {profile.designation || "User"}
           </p>
 
           <div className="profile-divider"></div>
@@ -138,97 +181,60 @@ function Profile({ currentUser, onCancel }) {
 
         {/* PROFILE INFORMATION */}
         <div className="profile-content">
-
           <section className="profile-section">
             <div className="profile-section-heading">
               <div>
                 <h2>Personal Information</h2>
-                <p>View and update your personal details.</p>
+                <p>Your registered employee information.</p>
               </div>
-
-              <button
-                className="profile-edit-btn"
-                onClick={() => {
-                  setIsEditing(!isEditing);
-                  setMessage("");
-                }}
-                type="button"
-              >
-                {isEditing ? "Cancel" : "Edit Profile"}
-              </button>
             </div>
 
-            <form onSubmit={handleSaveProfile}>
-              <div className="profile-form-grid">
-                <div className="profile-field">
-                  <label>Full Name</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={profile.name}
-                    onChange={handleProfileChange}
-                    disabled={!isEditing}
-                    required
-                  />
-                </div>
-
-                <div className="profile-field">
-                  <label>Employee ID</label>
-                  <input
-                    value={profile.employeeId}
-                    disabled
-                  />
-                </div>
-
-                <div className="profile-field">
-                  <label>Email Address</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={profile.email}
-                    onChange={handleProfileChange}
-                    disabled={!isEditing}
-                    required
-                  />
-                </div>
-
-                <div className="profile-field">
-                  <label>Phone Number</label>
-                  <input
-                    type="tel"
-                    name="phone"
-                    value={profile.phone}
-                    onChange={handleProfileChange}
-                    disabled={!isEditing}
-                    placeholder="Enter phone number"
-                  />
-                </div>
-
-                <div className="profile-field">
-                  <label>Designation</label>
-                  <input
-                    value={profile.designation}
-                    disabled
-                  />
-                </div>
-
-                <div className="profile-field">
-                  <label>Department</label>
-                  <input
-                    value={profile.department}
-                    disabled
-                  />
-                </div>
+            <div className="profile-form-grid">
+              <div className="profile-field">
+                <label>Full Name</label>
+                <input
+                  type="text"
+                  value={profile.name}
+                  disabled
+                />
               </div>
 
-              {isEditing && (
-                <div className="profile-actions">
-                  <button className="profile-save-btn" type="submit">
-                    Save Changes
-                  </button>
-                </div>
-              )}
-            </form>
+              <div className="profile-field">
+                <label>Employee ID</label>
+                <input
+                  type="text"
+                  value={profile.employeeId}
+                  disabled
+                />
+              </div>
+
+              <div className="profile-field">
+                <label>Email Address</label>
+                <input
+                  type="email"
+                  value={profile.email}
+                  disabled
+                />
+              </div>
+
+              <div className="profile-field">
+                <label>Designation</label>
+                <input
+                  type="text"
+                  value={profile.designation}
+                  disabled
+                />
+              </div>
+
+              <div className="profile-field">
+                <label>Department</label>
+                <input
+                  type="text"
+                  value={profile.department}
+                  disabled
+                />
+              </div>
+            </div>
           </section>
 
           {/* ACCOUNT SECURITY */}
@@ -242,14 +248,27 @@ function Profile({ currentUser, onCancel }) {
               <button
                 className="profile-edit-btn"
                 type="button"
-                onClick={() => {
-                  setShowPasswordForm(!showPasswordForm);
-                  setMessage("");
-                }}
+                onClick={togglePasswordForm}
+                disabled={isUpdatingPassword}
               >
                 {showPasswordForm ? "Cancel" : "Change Password"}
               </button>
             </div>
+
+              {message && (
+              <div className={`profile-message ${messageType}`} role="alert">
+                {message}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMessage("");
+                    setMessageType("");
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
 
             {showPasswordForm && (
               <form onSubmit={handlePasswordSubmit}>
@@ -261,7 +280,9 @@ function Profile({ currentUser, onCancel }) {
                       name="current"
                       value={passwords.current}
                       onChange={handlePasswordChange}
+                      autoComplete="current-password"
                       required
+                      disabled={isUpdatingPassword}
                     />
                   </div>
 
@@ -272,7 +293,9 @@ function Profile({ currentUser, onCancel }) {
                       name="new"
                       value={passwords.new}
                       onChange={handlePasswordChange}
+                      autoComplete="new-password"
                       required
+                      disabled={isUpdatingPassword}
                     />
                   </div>
 
@@ -283,20 +306,27 @@ function Profile({ currentUser, onCancel }) {
                       name="confirm"
                       value={passwords.confirm}
                       onChange={handlePasswordChange}
+                      autoComplete="new-password"
                       required
+                      disabled={isUpdatingPassword}
                     />
                   </div>
                 </div>
 
                 <div className="profile-actions">
-                  <button className="profile-save-btn" type="submit">
-                    Update Password
+                  <button
+                    className="profile-save-btn"
+                    type="submit"
+                    disabled={isUpdatingPassword}
+                  >
+                    {isUpdatingPassword
+                      ? "Updating..."
+                      : "Update Password"}
                   </button>
                 </div>
               </form>
             )}
           </section>
-
         </div>
       </div>
     </div>
