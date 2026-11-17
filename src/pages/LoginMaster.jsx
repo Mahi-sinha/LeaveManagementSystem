@@ -6,14 +6,20 @@ function LoginMaster() {
   const emptyForm = {
     loginId: "",
     employeeId: "",
+    employeeName: "",
     email: "",
+    companyId: "",
+    officeId: "",
+    designationId: "",
     roleId: "",
     status: "Active",
   };
 
   const [logins, setLogins] = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [offices, setOffices] = useState([]);
+  const [designations, setDesignations] = useState([]);
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -26,54 +32,68 @@ function LoginMaster() {
   const [error, setError] = useState("");
 
   // LOAD DATABASE RECORDS
-
   async function loadData() {
     setLoading(true);
     setError("");
 
     try {
-      const [loginResult, employeeResult, roleResult] =
-        await Promise.all([
-          supabase
-            .from("login_master")
-            .select("login_id, employee_name, email, role_id, status, employee_id")
-            .order("login_id"),
+      const [
+        loginResult,
+        roleResult,
+        companyResult,
+        officeResult,
+        designationResult,
+      ] = await Promise.all([
+        supabase
+          .from("login_master")
+          .select("login_id, employee_name, email, role_id, status, employee_id")
+          .order("login_id"),
 
-          supabase
-            .from("employee_master")
-            .select("employee_id, employee_name")
-            .order("employee_name"),
+        supabase
+          .from("role_master")
+          .select("id, role_name, status")
+          .order("id"),
 
-          supabase
-            .from("role_master")
-            .select("id, role_name, status")
-            .order("id"),
-        ]);
+        supabase
+          .from("company_master")
+          .select("id, company_name")
+          .order("company_name"),
+
+        supabase
+          .from("office_master")
+          .select("id, office_name, company_id")
+          .order("office_name"),
+
+        supabase
+          .from("designation_master")
+          .select("id, designation_name")
+          .order("designation_name"),
+      ]);
 
       if (loginResult.error) throw loginResult.error;
-      if (employeeResult.error) throw employeeResult.error;
       if (roleResult.error) throw roleResult.error;
+      if (companyResult.error) throw companyResult.error;
+      if (officeResult.error) throw officeResult.error;
+      if (designationResult.error) throw designationResult.error;
 
       setLogins(loginResult.data || []);
-      setEmployees(employeeResult.data || []);
       setRoles(roleResult.data || []);
-
-      console.log("Employees:", employeeResult.data);
-      console.log("Roles:", roleResult.data);
-      console.log("Login accounts:", loginResult.data);
-
+      setCompanies(companyResult.data || []);
+      setOffices(officeResult.data || []);
+      setDesignations(designationResult.data || []);
     } catch (err) {
       console.error("Login Master loading error:", err);
       setError(err.message || "Unable to load data from Supabase.");
 
-      setEmployees([]);
-      setRoles([]);
       setLogins([]);
+      setRoles([]);
+      setCompanies([]);
+      setOffices([]);
+      setDesignations([]);
     } finally {
       setLoading(false);
     }
   }
-
 
   useEffect(() => {
     loadData();
@@ -82,8 +102,8 @@ function LoginMaster() {
   // GET ROLE NAME
   function getRoleName(roleId) {
     return (
-      roles.find((role) => role.id === roleId)?.role_name ||
-      "Unknown Role"
+      roles.find((role) => String(role.id) === String(roleId))
+        ?.role_name || "Unknown Role"
     );
   }
 
@@ -95,12 +115,9 @@ function LoginMaster() {
     );
   }
 
-  // EMPLOYEES WITHOUT LOGIN ACCOUNTS
-  const availableEmployees = employees.filter(
-    (employee) =>
-      !logins.some(
-        (login) => login.employee_id === employee.employee_id
-      )
+  // AVAILABLE OFFICES FOR SELECTED COMPANY
+  const filteredOffices = offices.filter(
+    (office) => String(office.company_id) === String(form.companyId)
   );
 
   // SEARCH
@@ -128,6 +145,7 @@ function LoginMaster() {
     setForm((previous) => ({
       ...previous,
       [name]: value,
+      ...(name === "companyId" ? { officeId: "" } : {}),
     }));
   }
 
@@ -168,65 +186,84 @@ function LoginMaster() {
     if (saving) return;
 
     const selectedRole = roles.find(
-      (role) => role.id === Number(form.roleId)
+      (role) => String(role.id) === String(form.roleId)
     );
 
     if (
       !selectedRole ||
       selectedRole.status?.toLowerCase() !== "active"
     ) {
-      setError("Please select an active role.");
+      setError("Please select an active application role.");
       return;
     }
 
-    // CREATE LOGIN
+    // CREATE EMPLOYEE AND LOGIN ACCOUNT
     if (editingId === null) {
-      const selectedEmployee = employees.find(
-        (employee) =>
-          employee.employee_id === form.employeeId
-      );
-
-      if (!selectedEmployee) {
-        setError("Please select a valid employee.");
+      if (selectedRole.role_name.toLowerCase() === "admin") {
+        setError("Additional Admin accounts cannot be created.");
         return;
       }
 
-      if (
-        selectedRole.role_name.toLowerCase() === "admin"
-      ) {
-        setError("Additional Admin accounts cannot be created.");
+      if (!form.employeeId.trim() || !form.employeeName.trim()) {
+        setError("Please enter Employee ID and Employee Name.");
+        return;
+      }
+
+      if (!form.companyId || !form.officeId || !form.designationId) {
+        setError("Please select Company, Office and Designation.");
         return;
       }
 
       setSaving(true);
 
-      const { data, error: functionError } =
-        await supabase.functions.invoke("manage-login", {
-          body: {
-            login_id: form.loginId.trim(),
-            employee_id: form.employeeId,
-            email: form.email.trim().toLowerCase(),
-            role_id: Number(form.roleId),
-          },
-        });
+      try {
+        const { data, error: functionError } =
+          await supabase.functions.invoke("manage-login", {
+            body: {
+              login_id: form.loginId.trim(),
+              employee_id: form.employeeId.trim(),
+              employee_name: form.employeeName.trim(),
+              email: form.email.trim().toLowerCase(),
+              company_id: Number(form.companyId),
+              office_id: Number(form.officeId),
+              designation_id: Number(form.designationId),
+              role_id: Number(form.roleId),
+            },
+          });
 
-      setSaving(false);
+        if (functionError || !data?.success) {
+          let message =
+            data?.error ||
+            functionError?.message ||
+            "Unable to create login account.";
 
-      if (functionError || !data?.success) {
-        setError(
-          data?.error ||
-          functionError?.message ||
-          "Unable to create login account."
+          if (functionError?.context?.json) {
+            try {
+              const details = await functionError.context.json();
+              message = details?.error || message;
+            } catch {
+              // Keep the original error message.
+            }
+          }
+
+          throw new Error(message);
+        }
+
+        setMessage(
+          "Employee and login account created. Invitation sent to " +
+            form.email.trim()
         );
-        return;
+
+        setShowForm(false);
+        setForm(emptyForm);
+        await loadData();
+      } catch (err) {
+        console.error("Create login error:", err);
+        setError(err.message || "Unable to create login account.");
+      } finally {
+        setSaving(false);
       }
 
-      setMessage(
-        "Invitation sent successfully to " + form.email.trim()
-      );
-
-      closeForm();
-      await loadData();
       return;
     }
 
@@ -258,7 +295,6 @@ function LoginMaster() {
     }
 
     setMessage("Login account updated successfully.");
-
     closeForm();
     await loadData();
   }
@@ -271,10 +307,12 @@ function LoginMaster() {
     setMessage("");
 
     setForm({
+      ...emptyForm,
       loginId: item.login_id,
-      employeeId: item.employee_id,
+      employeeId: item.employee_id || "",
+      employeeName: item.employee_name || "",
       email: item.email,
-      roleId: item.role_id.toString(),
+      roleId: String(item.role_id),
       status: item.status,
     });
 
@@ -314,11 +352,6 @@ function LoginMaster() {
     await loadData();
   }
 
-  // SELECTED EMPLOYEE
-  const selectedEmployee = employees.find(
-    (employee) => employee.employee_id === form.employeeId
-  );
-
   return (
     <div className="page-content login-master-page">
 
@@ -331,9 +364,7 @@ function LoginMaster() {
 
           <h1>Login Master</h1>
 
-          <p>
-            Manage user login accounts and access roles.
-          </p>
+          <p>Manage user login accounts and access roles.</p>
         </div>
 
         <button
@@ -360,7 +391,6 @@ function LoginMaster() {
 
       {/* STATISTICS */}
       <div className="master-stats">
-
         <div className="master-stat-card">
           <div className="master-stat-icon">
             <span>♟</span>
@@ -390,13 +420,11 @@ function LoginMaster() {
             <h2>{inactiveCount}</h2>
           </div>
         </div>
-
       </div>
 
       {/* CREATE / EDIT FORM */}
       {showForm && (
         <div className="master-form-card">
-
           <div className="master-form-heading">
             <div>
               <h2>
@@ -408,7 +436,7 @@ function LoginMaster() {
               <p>
                 {editingId !== null
                   ? "Update the account details below."
-                  : "Create a login account and send an invitation."}
+                  : "Create an employee record and login account together."}
               </p>
             </div>
 
@@ -422,12 +450,10 @@ function LoginMaster() {
           </div>
 
           <form onSubmit={handleSubmit}>
-
             <div className="master-form-grid">
 
               <div className="master-field">
                 <label>Login ID *</label>
-
                 <input
                   type="text"
                   name="loginId"
@@ -439,43 +465,36 @@ function LoginMaster() {
                 />
               </div>
 
-              <div className="master-field">
-                <label>Select Employee *</label>
+              {editingId === null && (
+                <div className="master-field">
+                  <label>Employee ID *</label>
+                  <input
+                    type="text"
+                    name="employeeId"
+                    placeholder="Enter employee ID"
+                    value={form.employeeId}
+                    onChange={handleChange}
+                    required
+                  />
+                </div>
+              )}
 
-                <select
-                  name="employeeId"
-                  value={form.employeeId}
-                  onChange={handleChange}
-                  disabled={editingId !== null}
-                  required
-                >
-                  <option value="">Select Employee</option>
-
-                  {availableEmployees.map((employee) => (
-                    <option
-                      key={employee.employee_id}
-                      value={employee.employee_id}
-                    >
-                      {employee.employee_name} ({employee.employee_id})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="master-field">
-                <label>Employee Name</label>
-
-                <input
-                  type="text"
-                  value={selectedEmployee?.employee_name || ""}
-                  placeholder="Select an employee"
-                  readOnly
-                />
-              </div>
+              {editingId === null && (
+                <div className="master-field">
+                  <label>Employee Name *</label>
+                  <input
+                    type="text"
+                    name="employeeName"
+                    placeholder="Enter employee name"
+                    value={form.employeeName}
+                    onChange={handleChange}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="master-field">
                 <label>Email Address *</label>
-
                 <input
                   type="email"
                   name="email"
@@ -487,8 +506,69 @@ function LoginMaster() {
                 />
               </div>
 
+              {editingId === null && (
+                <>
+                  <div className="master-field">
+                    <label>Company *</label>
+                    <select
+                      name="companyId"
+                      value={form.companyId}
+                      onChange={handleChange}
+                      required
+                    >
+                      <option value="">Select Company</option>
+                      {companies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.company_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="master-field">
+                    <label>Office *</label>
+                    <select
+                      name="officeId"
+                      value={form.officeId}
+                      onChange={handleChange}
+                      disabled={!form.companyId}
+                      required
+                    >
+                      <option value="">Select Office</option>
+                      {filteredOffices.map((office) => (
+                        <option key={office.id} value={office.id}>
+                          {office.office_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="master-field">
+                    <label>Designation *</label>
+                    <select
+                      name="designationId"
+                      value={form.designationId}
+                      onChange={handleChange}
+                      required
+                    >
+                      <option value="">Select Designation</option>
+                      {designations.map((designation) => (
+                        <option
+                          key={designation.id}
+                          value={designation.id}
+                        >
+                          {designation.designation_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
               <div className="master-field">
-                <label>Assign Role *</label>
+                <label>
+                  {editingId !== null ? "Application Role *" : "Assign Application Role *"}
+                </label>
 
                 <select
                   name="roleId"
@@ -505,10 +585,7 @@ function LoginMaster() {
                         String(role.role_name || "").trim().toLowerCase() !== "admin"
                     )
                     .map((role) => (
-                      <option
-                        key={role.id}
-                        value={String(role.id)}
-                      >
+                      <option key={role.id} value={String(role.id)}>
                         {role.role_name}
                       </option>
                     ))}
@@ -518,7 +595,6 @@ function LoginMaster() {
               {editingId !== null && (
                 <div className="master-field">
                   <label>Account Status</label>
-
                   <select
                     name="status"
                     value={form.status}
@@ -529,11 +605,9 @@ function LoginMaster() {
                   </select>
                 </div>
               )}
-
             </div>
 
             <div className="master-actions">
-
               <button
                 type="button"
                 className="master-cancel-btn"
@@ -554,24 +628,17 @@ function LoginMaster() {
                     ? "Update Account"
                     : "Create Account"}
               </button>
-
             </div>
-
           </form>
         </div>
       )}
 
       {/* LOGIN TABLE */}
       <div className="master-table-card">
-
         <div className="master-table-header">
-
           <div>
             <h2>Login Accounts</h2>
-
-            <p>
-              View and manage registered login accounts.
-            </p>
+            <p>View and manage registered login accounts.</p>
           </div>
 
           <input
@@ -581,13 +648,10 @@ function LoginMaster() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-
         </div>
 
         <div className="master-table-wrapper">
-
           <table className="master-table">
-
             <thead>
               <tr>
                 <th>Login ID</th>
@@ -600,7 +664,6 @@ function LoginMaster() {
             </thead>
 
             <tbody>
-
               {loading ? (
                 <tr>
                   <td colSpan="6" className="master-empty">
@@ -608,20 +671,12 @@ function LoginMaster() {
                   </td>
                 </tr>
               ) : filteredLogins.length > 0 ? (
-
                 filteredLogins.map((item) => (
                   <tr key={item.login_id}>
-
-                    <td>
-                      <strong>{item.login_id}</strong>
-                    </td>
-
+                    <td><strong>{item.login_id}</strong></td>
                     <td>{item.employee_name}</td>
-
                     <td>{item.email}</td>
-
                     <td>{getRoleName(item.role_id)}</td>
-
                     <td>
                       <span
                         className={`login-status-badge ${
@@ -634,10 +689,8 @@ function LoginMaster() {
                         {item.status}
                       </span>
                     </td>
-
                     <td>
                       <div className="login-row-actions">
-
                         {isAdmin(item) ? (
                           <span>Protected</span>
                         ) : (
@@ -661,13 +714,10 @@ function LoginMaster() {
                             </button>
                           </>
                         )}
-
                       </div>
                     </td>
-
                   </tr>
                 ))
-
               ) : (
                 <tr>
                   <td colSpan="6" className="master-empty">
@@ -675,15 +725,10 @@ function LoginMaster() {
                   </td>
                 </tr>
               )}
-
             </tbody>
-
           </table>
-
         </div>
-
       </div>
-
     </div>
   );
 }
